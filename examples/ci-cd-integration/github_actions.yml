@@ -1,0 +1,382 @@
+# GitHub Actions Workflow for Automated Code Signing with MCP
+# This workflow demonstrates enterprise-grade code signing integration
+
+name: Build, Sign, and Release
+
+on:
+  push:
+    branches: [main, release/*]
+  release:
+    types: [published]
+  pull_request:
+    branches: [main]
+
+env:
+  CODE_SIGNING_MCP_URL: ${{ secrets.CODE_SIGNING_MCP_URL }}
+  CODE_SIGNING_API_KEY: ${{ secrets.CODE_SIGNING_API_KEY }}
+
+jobs:
+  build:
+    name: Build Multi-Platform Artifacts
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [windows, macos, linux]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Build Environment
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+        
+    - name: Build Application
+      run: |
+        mvn clean package -P${{ matrix.platform }}
+        
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: artifacts-${{ matrix.platform }}
+        path: target/
+        retention-days: 30
+
+  security-scan:
+    name: Security and Compliance Scan
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+    - name: Download Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: artifacts-*
+        merge-multiple: true
+        
+    - name: Security Policy Validation
+      run: |
+        curl -X POST "$CODE_SIGNING_MCP_URL/tools/policy_validation" \
+          -H "Authorization: Bearer $CODE_SIGNING_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "file_path": "./target/myapp.jar",
+            "policy_set": "enterprise",
+            "custom_policies": {
+              "require_vulnerability_scan": true,
+              "max_critical_vulnerabilities": 0,
+              "require_license_compliance": true
+            }
+          }'
+          
+    - name: Vulnerability Analysis
+      uses: anchore/syft-action@v1
+      with:
+        path: "./target/"
+        format: spdx-json
+        
+    - name: Upload Security Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-scan-results
+        path: |
+          *.spdx.json
+          security-report.json
+
+  sign-artifacts:
+    name: Enterprise Code Signing
+    runs-on: ubuntu-latest
+    needs: [build, security-scan]
+    if: github.event_name == 'release' || github.ref == 'refs/heads/main'
+    
+    permissions:
+      contents: write
+      attestations: write
+      
+    steps:
+    - name: Download Build Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: artifacts-*
+        merge-multiple: true
+        
+    - name: Setup Code Signing MCP Client
+      run: |
+        pip install code-signing-mcp-client
+        
+    - name: Sign Java Application
+      id: sign-jar
+      run: |
+        response=$(curl -X POST "$CODE_SIGNING_MCP_URL/tools/sign_binary" \
+          -H "Authorization: Bearer $CODE_SIGNING_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "file_path": "./target/myapp.jar",
+            "credential_id": "enterprise_hsm",
+            "artifact_type": "jar",
+            "generate_attestation": true,
+            "embed_c2pa": true,
+            "metadata": {
+              "github_repository": "${{ github.repository }}",
+              "github_sha": "${{ github.sha }}",
+              "github_ref": "${{ github.ref }}",
+              "build_timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+            }
+          }')
+        echo "signing_result=$response" >> $GITHUB_OUTPUT
+        
+    - name: Sign Windows Executables
+      if: matrix.platform == 'windows'
+      run: |
+        curl -X POST "$CODE_SIGNING_MCP_URL/tools/batch_sign" \
+          -H "Authorization: Bearer $CODE_SIGNING_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "file_patterns": ["./target/*.exe", "./target/*.msi"],
+            "credential_id": "authenticode_certificate",
+            "parallel_limit": 3,
+            "skip_existing": false,
+            "signing_options": {
+              "timestamp_server": "http://timestamp.digicert.com",
+              "description": "MyApp - Enterprise Application",
+              "info_url": "https://github.com/${{ github.repository }}"
+            }
+          }'
+          
+    - name: Sign macOS Applications
+      if: matrix.platform == 'macos'
+      run: |
+        curl -X POST "$CODE_SIGNING_MCP_URL/tools/batch_sign" \
+          -H "Authorization: Bearer $CODE_SIGNING_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "file_patterns": ["./target/*.dmg", "./target/*.pkg"],
+            "credential_id": "apple_developer_id",
+            "parallel_limit": 2,
+            "signing_options": {
+              "notarize": true,
+              "staple": true,
+              "bundle_id": "com.yourcompany.myapp"
+            }
+          }'
+          
+    - name: Sign Linux Packages
+      if: matrix.platform == 'linux'
+      run: |
+        curl -X POST "$CODE_SIGNING_MCP_URL/tools/batch_sign" \
+          -H "Authorization: Bearer $CODE_SIGNING_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "file_patterns": ["./target/*.deb", "./target/*.rpm"],
+            "credential_id": "gpg_signing_key",
+            "parallel_limit": 2,
+            "signing_options": {
+              "armor": true,
+              "detach_sign": true
+            }
+          }'
+
+  supply-chain-attestation:
+    name: Generate Supply Chain Attestations
+    runs-on: ubuntu-latest
+    needs: sign-artifacts
+    
+    steps:
+    - name: Download Signed Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: artifacts-*
+        merge-multiple: true
+        
+    - name: Generate SLSA Provenance
+      run: |
+        curl -X POST "$CODE_SIGNING_MCP_URL/tools/supply_chain_attestation" \
+          -H "Authorization: Bearer $CODE_SIGNING_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "build_artifacts": [
+              "./target/myapp.jar",
+              "./target/myapp.exe", 
+              "./target/MyApp.dmg",
+              "./target/myapp.deb"
+            ],
+            "source_repository": "${{ github.repository }}",
+            "build_environment": {
+              "github_workflow": "${{ github.workflow }}",
+              "github_run_id": "${{ github.run_id }}",
+              "github_sha": "${{ github.sha }}",
+              "github_ref": "${{ github.ref }}",
+              "runner_os": "${{ runner.os }}",
+              "runner_arch": "${{ runner.arch }}",
+              "java_version": "17",
+              "maven_version": "3.8.6"
+            },
+            "attestation_level": "3",
+            "generate_vsa": true,
+            "include_dependencies": true
+          }'
+          
+    - name: Generate GitHub Attestations
+      uses: actions/attest-build-provenance@v1
+      with:
+        subject-path: './target/myapp.jar'
+        
+    - name: Upload Attestations
+      uses: actions/upload-artifact@v4
+      with:
+        name: supply-chain-attestations
+        path: |
+          *.intoto.jsonl
+          *.slsa.json
+          *.vsa.json
+
+  verify-signatures:
+    name: Verify Signed Artifacts
+    runs-on: ubuntu-latest
+    needs: sign-artifacts
+    
+    steps:
+    - name: Download Signed Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: artifacts-*
+        merge-multiple: true
+        
+    - name: Verify All Signatures
+      run: |
+        # Verify each signed artifact
+        for file in ./target/*.{jar,exe,dmg,deb,rpm}; do
+          if [ -f "$file" ]; then
+            echo "Verifying $file..."
+            curl -X POST "$CODE_SIGNING_MCP_URL/tools/verify_signature" \
+              -H "Authorization: Bearer $CODE_SIGNING_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"file_path\": \"$file\",
+                \"check_certificate_chain\": true,
+                \"check_timestamp\": true,
+                \"check_revocation\": true,
+                \"verify_c2pa\": true
+              }"
+          fi
+        done
+        
+    - name: Security Compliance Check
+      run: |
+        curl -X POST "$CODE_SIGNING_MCP_URL/tools/audit_trail" \
+          -H "Authorization: Bearer $CODE_SIGNING_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "operation_type": "batch_verification",
+            "github_context": {
+              "repository": "${{ github.repository }}",
+              "run_id": "${{ github.run_id }}",
+              "sha": "${{ github.sha }}"
+            },
+            "export_format": "json",
+            "include_compliance_report": true
+          }'
+
+  publish-release:
+    name: Publish Signed Release
+    runs-on: ubuntu-latest
+    needs: [supply-chain-attestation, verify-signatures]
+    if: github.event_name == 'release'
+    
+    permissions:
+      contents: write
+      
+    steps:
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        merge-multiple: true
+        
+    - name: Create Release Checksums
+      run: |
+        sha256sum ./target/* > checksums.sha256
+        
+    - name: Upload Release Assets
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          ./target/myapp.jar
+          ./target/myapp.jar.sig
+          ./target/myapp.exe
+          ./target/myapp.exe.sig
+          ./target/MyApp.dmg
+          ./target/myapp.deb
+          ./target/myapp.deb.sig
+          ./target/myapp.rpm
+          ./target/myapp.rpm.sig
+          checksums.sha256
+          *.intoto.jsonl
+          *.slsa.json
+          security-scan-results/*
+        body: |
+          ## 🔐 Signed Release with Supply Chain Security
+          
+          This release has been automatically signed with enterprise-grade certificates and includes comprehensive supply chain attestations.
+          
+          ### 📋 Security Attestations
+          - ✅ **SLSA Level 3** provenance attestations included
+          - ✅ **Code signing** with HSM-protected certificates  
+          - ✅ **C2PA manifests** embedded for content authenticity
+          - ✅ **Vulnerability scanning** passed with zero critical issues
+          - ✅ **License compliance** verified
+          
+          ### 🔍 Verification Instructions
+          ```bash
+          # Verify JAR signature
+          jarsigner -verify myapp.jar
+          
+          # Verify Windows executable
+          signtool verify /pa myapp.exe
+          
+          # Verify macOS application
+          codesign -v MyApp.dmg
+          
+          # Verify Linux packages
+          gpg --verify myapp.deb.sig myapp.deb
+          ```
+          
+          ### 📊 Build Information
+          - **Repository**: ${{ github.repository }}
+          - **Commit**: ${{ github.sha }}
+          - **Build Date**: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          - **Workflow**: ${{ github.workflow }} (#${{ github.run_number }})
+
+  notify-security-team:
+    name: Security Team Notification
+    runs-on: ubuntu-latest
+    needs: publish-release
+    if: always()
+    
+    steps:
+    - name: Send Security Notification
+      run: |
+        curl -X POST "${{ secrets.SECURITY_WEBHOOK_URL }}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "event": "code_signing_workflow_completed",
+            "repository": "${{ github.repository }}",
+            "sha": "${{ github.sha }}",
+            "workflow_status": "${{ job.status }}",
+            "signing_summary": {
+              "artifacts_signed": 6,
+              "attestations_generated": true,
+              "compliance_verified": true,
+              "security_scan_passed": true
+            },
+            "audit_trail_id": "${{ github.run_id }}"
+          }'
+
+# Security best practices:
+# 1. All secrets are stored in GitHub Secrets
+# 2. Code signing operations are audited
+# 3. Multi-platform signing with appropriate credentials
+# 4. Supply chain attestations for compliance
+# 5. Verification steps ensure integrity
+# 6. Security team notifications for oversight

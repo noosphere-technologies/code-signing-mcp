@@ -1,0 +1,274 @@
+{
+  "server": {
+    "name": "code-signing-mcp",
+    "version": "1.0.0",
+    "description": "Enterprise code signing MCP server",
+    "port": 8080,
+    "host": "0.0.0.0",
+    "log_level": "INFO",
+    "enable_cors": true,
+    "cors_origins": ["*"],
+    "max_workers": 10
+  },
+  
+  "services": {
+    "code_signing_agent": {
+      "url": "http://localhost:8081",
+      "api_key": "${CODE_SIGNING_AGENT_API_KEY}",
+      "timeout": 300,
+      "retry_attempts": 3,
+      "retry_delay": 1.0
+    },
+    "c2pa_artifact": {
+      "url": "http://localhost:8082", 
+      "api_key": "${C2PA_ARTIFACT_API_KEY}",
+      "timeout": 120,
+      "retry_attempts": 3,
+      "retry_delay": 1.0
+    },
+    "metadata_service": {
+      "url": "http://localhost:8083",
+      "api_key": "${METADATA_SERVICE_API_KEY}",
+      "timeout": 30
+    },
+    "trust_engine": {
+      "url": "http://localhost:8084",
+      "api_key": "${TRUST_ENGINE_API_KEY}",
+      "timeout": 60
+    }
+  },
+  
+  "credentials": {
+    "default_software_key": {
+      "id": "software-key-1",
+      "name": "Default Software Key",
+      "type": "software",
+      "security_level": "standard",
+      "keystore_path": "/etc/code-signing/keystore.p12",
+      "keystore_password": "${SOFTWARE_KEYSTORE_PASSWORD}",
+      "key_alias": "signing-key",
+      "certificate_chain": [],
+      "enabled": true,
+      "metadata": {
+        "organization": "Noosphere Technologies",
+        "validity_period": "1 year",
+        "key_usage": ["digital_signature", "code_signing"]
+      }
+    },
+    "enterprise_hsm": {
+      "id": "hsm-enterprise-1",
+      "name": "Enterprise HSM Key",
+      "type": "hsm",
+      "security_level": "high",
+      "pkcs11_config": {
+        "library_path": "/usr/lib/softhsm/libsofthsm2.so",
+        "slot": 0,
+        "pin": "${HSM_PIN}",
+        "token_label": "CodeSigning"
+      },
+      "key_label": "enterprise-signing-key",
+      "certificate_chain": [],
+      "enabled": true,
+      "metadata": {
+        "organization": "Noosphere Technologies",
+        "compliance": ["FIPS-140-2", "Common-Criteria-EAL4"],
+        "key_usage": ["digital_signature", "code_signing", "timestamp"]
+      }
+    },
+    "cloud_kms_aws": {
+      "id": "aws-kms-1",
+      "name": "AWS KMS Key",
+      "type": "cloud_kms",
+      "security_level": "enterprise", 
+      "provider": "aws",
+      "key_id": "${AWS_KMS_KEY_ID}",
+      "region": "us-east-1",
+      "credentials": {
+        "access_key_id": "${AWS_ACCESS_KEY_ID}",
+        "secret_access_key": "${AWS_SECRET_ACCESS_KEY}"
+      },
+      "enabled": false,
+      "metadata": {
+        "organization": "Noosphere Technologies", 
+        "compliance": ["FIPS-140-2"],
+        "key_usage": ["digital_signature"]
+      }
+    }
+  },
+  
+  "signing": {
+    "default_credential": "default_software_key",
+    "timestamp_authorities": [
+      {
+        "name": "DigiCert",
+        "url": "http://timestamp.digicert.com",
+        "enabled": true
+      },
+      {
+        "name": "Sectigo", 
+        "url": "http://timestamp.sectigo.com",
+        "enabled": false
+      }
+    ],
+    "default_timestamp_url": "http://timestamp.digicert.com",
+    "max_file_size": 104857600,
+    "supported_formats": [
+      "jar", "exe", "msi", "dmg", "pkg", "deb", "rpm", 
+      "appx", "msix", "apk", "ipa", "tar.gz", "zip"
+    ],
+    "batch_settings": {
+      "max_concurrent": 5,
+      "max_batch_size": 100,
+      "timeout_per_file": 60
+    }
+  },
+  
+  "security": {
+    "authentication": {
+      "required": true,
+      "methods": ["api_key", "jwt"],
+      "api_key_header": "X-API-Key",
+      "jwt_secret": "${JWT_SECRET}",
+      "jwt_expiration": 3600
+    },
+    "authorization": {
+      "enabled": true,
+      "default_role": "user",
+      "roles": {
+        "admin": {
+          "permissions": ["*"]
+        },
+        "enterprise": {
+          "permissions": [
+            "sign_binary", "sign_package", "verify_signature",
+            "get_certificate_info", "create_signing_request", 
+            "manage_certificates", "hsm_operations", "batch_sign",
+            "github_integration", "policy_validation", "audit_trail",
+            "supply_chain_attestation"
+          ]
+        },
+        "user": {
+          "permissions": [
+            "sign_binary", "sign_package", "verify_signature",
+            "get_certificate_info"
+          ]
+        }
+      }
+    },
+    "rate_limiting": {
+      "enabled": true,
+      "requests_per_minute": 100,
+      "burst_allowance": 10
+    },
+    "audit": {
+      "enabled": true,
+      "log_all_operations": true,
+      "log_file": "/var/log/code-signing-mcp/audit.log",
+      "retention_days": 90,
+      "include_request_data": false,
+      "include_response_data": false
+    }
+  },
+  
+  "policies": {
+    "default_policy_set": "enterprise",
+    "policy_sets": {
+      "basic": {
+        "require_timestamp": false,
+        "allow_self_signed": true,
+        "min_key_size": 2048,
+        "allowed_algorithms": ["SHA256", "SHA384", "SHA512"]
+      },
+      "enterprise": {
+        "require_timestamp": true,
+        "allow_self_signed": false,
+        "min_key_size": 2048,
+        "allowed_algorithms": ["SHA256", "SHA384", "SHA512"],
+        "require_certificate_chain": true,
+        "max_certificate_age_days": 365,
+        "require_hsm_for_critical": true
+      },
+      "fips": {
+        "require_timestamp": true,
+        "allow_self_signed": false,
+        "min_key_size": 2048,
+        "allowed_algorithms": ["SHA256", "SHA384", "SHA512"],
+        "require_certificate_chain": true,
+        "max_certificate_age_days": 365,
+        "require_hsm": true,
+        "fips_140_2_compliance": true
+      }
+    }
+  },
+  
+  "c2pa": {
+    "enabled": true,
+    "default_embed": true,
+    "supported_formats": ["jpg", "jpeg", "png", "webp", "pdf", "mp4"],
+    "manifest_settings": {
+      "include_provenance": true,
+      "include_thumbnails": true,
+      "compression_level": 6
+    }
+  },
+  
+  "attestations": {
+    "slsa": {
+      "enabled": true,
+      "default_level": "3",
+      "builder_id": "https://github.com/noosphere-technologies/code-signing-mcp",
+      "build_type": "https://github.com/noosphere-technologies/code-signing-mcp/build-type/v1"
+    },
+    "in_toto": {
+      "enabled": true,
+      "layout_key": "${IN_TOTO_LAYOUT_KEY}",
+      "metadata_dir": "/var/lib/code-signing-mcp/attestations"
+    }
+  },
+  
+  "github": {
+    "integration": {
+      "enabled": true,
+      "webhook_secret": "${GITHUB_WEBHOOK_SECRET}",
+      "default_events": ["push", "release", "workflow_run"],
+      "auto_sign_releases": true
+    },
+    "api": {
+      "token": "${GITHUB_TOKEN}",
+      "base_url": "https://api.github.com"
+    }
+  },
+  
+  "monitoring": {
+    "metrics": {
+      "enabled": true,
+      "endpoint": "/metrics",
+      "include_detailed_timing": true
+    },
+    "health_check": {
+      "enabled": true,
+      "endpoint": "/health",
+      "check_services": true,
+      "check_credentials": false
+    },
+    "tracing": {
+      "enabled": false,
+      "jaeger_endpoint": "http://localhost:14268/api/traces"
+    }
+  },
+  
+  "storage": {
+    "temp_dir": "/tmp/code-signing-mcp",
+    "cache_dir": "/var/cache/code-signing-mcp",
+    "cache_ttl": 3600,
+    "max_cache_size": "1GB"
+  },
+  
+  "features": {
+    "experimental": {
+      "quantum_resistant_signatures": false,
+      "distributed_signing": false,
+      "ai_policy_recommendations": false
+    }
+  }
+}

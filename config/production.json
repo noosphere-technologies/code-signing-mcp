@@ -1,0 +1,280 @@
+{
+  "server": {
+    "name": "code-signing-mcp",
+    "version": "1.0.0", 
+    "description": "Noosphere enterprise code signing MCP server",
+    "port": 8080,
+    "host": "0.0.0.0",
+    "log_level": "INFO",
+    "enable_cors": true,
+    "cors_origins": ["*"],
+    "max_workers": 10
+  },
+  
+  "services": {
+    "c2pa_artifact": {
+      "url": "https://artifact-service.noosphere.tech",
+      "api_key": "${C2PA_ARTIFACT_API_KEY}",
+      "timeout": 300,
+      "retry_attempts": 3,
+      "retry_delay": 1.0
+    },
+    "certificate_authority": {
+      "url": "https://ca.noosphere.tech",
+      "api_key": "${CA_API_TOKEN}",
+      "timeout": 60,
+      "retry_attempts": 3,
+      "retry_delay": 1.0
+    },
+    "did_service": {
+      "url": "https://did.noosphere.tech",
+      "api_key": "${DID_SERVICE_API_KEY}",
+      "timeout": 30
+    },
+    "vc_service": {
+      "url": "https://vc.noosphere.tech", 
+      "api_key": "${VC_SERVICE_API_KEY}",
+      "timeout": 30
+    },
+    "metadata_service": {
+      "url": "https://metadata.noosphere.tech",
+      "api_key": "${METADATA_SERVICE_API_KEY}",
+      "timeout": 60
+    }
+  },
+  
+  "ipfs": {
+    "host": "35.223.165.115",
+    "port": 5001,
+    "gateway": "https://ipfs.noosphere.tech",
+    "pin_by_default": true
+  },
+  
+  "credentials": {
+    "enterprise_hsm": {
+      "id": "enterprise_hsm",
+      "name": "Enterprise HSM Key",
+      "type": "hsm",
+      "security_level": "high",
+      "provider": "c2pa_artifact_service",
+      "enabled": true,
+      "metadata": {
+        "organization": "Noosphere Technologies",
+        "compliance": ["FIPS-140-2", "Common-Criteria-EAL4"],
+        "key_usage": ["digital_signature", "code_signing"]
+      }
+    },
+    "software_signing_key": {
+      "id": "software_signing_key", 
+      "name": "Software Signing Key",
+      "type": "software",
+      "security_level": "standard",
+      "provider": "c2pa_artifact_service",
+      "enabled": true,
+      "metadata": {
+        "organization": "Noosphere Technologies",
+        "key_usage": ["digital_signature", "code_signing"]
+      }
+    }
+  },
+  
+  "signing": {
+    "default_credential": "enterprise_hsm",
+    "timestamp_authorities": [
+      {
+        "name": "DigiCert",
+        "url": "http://timestamp.digicert.com",
+        "enabled": true
+      },
+      {
+        "name": "Sectigo",
+        "url": "http://timestamp.sectigo.com", 
+        "enabled": false
+      }
+    ],
+    "default_timestamp_url": "http://timestamp.digicert.com",
+    "max_file_size": 104857600,
+    "supported_formats": [
+      "jar", "exe", "msi", "dmg", "pkg", "deb", "rpm",
+      "bin", "dll", "so", "dylib", "zip", "tar", "gz", 
+      "xz", "7z", "img", "iso"
+    ],
+    "batch_settings": {
+      "max_concurrent": 5,
+      "max_batch_size": 100,
+      "timeout_per_file": 300
+    }
+  },
+  
+  "security": {
+    "authentication": {
+      "required": true,
+      "methods": ["api_key", "did_auth"],
+      "api_key_header": "X-API-Key",
+      "did_auth_header": "X-DID-Auth"
+    },
+    "authorization": {
+      "enabled": true,
+      "default_role": "user",
+      "roles": {
+        "admin": {
+          "permissions": ["*"]
+        },
+        "enterprise": {
+          "permissions": [
+            "sign_binary", "sign_package", "verify_signature",
+            "get_certificate_info", "create_signing_request",
+            "manage_certificates", "hsm_operations", "batch_sign",
+            "github_integration", "policy_validation", "audit_trail",
+            "supply_chain_attestation"
+          ]
+        },
+        "user": {
+          "permissions": [
+            "sign_binary", "sign_package", "verify_signature",
+            "get_certificate_info"
+          ]
+        }
+      }
+    },
+    "rate_limiting": {
+      "enabled": true,
+      "requests_per_minute": 100,
+      "burst_allowance": 10
+    },
+    "audit": {
+      "enabled": true,
+      "log_all_operations": true,
+      "log_file": "/var/log/code-signing-mcp/audit.log",
+      "retention_days": 90,
+      "include_request_data": false,
+      "include_response_data": false,
+      "store_in_metadata_service": true
+    }
+  },
+  
+  "policies": {
+    "default_policy_set": "enterprise",
+    "policy_sets": {
+      "basic": {
+        "require_timestamp": false,
+        "allow_self_signed": true,
+        "min_key_size": 2048,
+        "allowed_algorithms": ["SHA256", "SHA384", "SHA512"]
+      },
+      "enterprise": {
+        "require_timestamp": true,
+        "allow_self_signed": false,
+        "min_key_size": 2048,
+        "allowed_algorithms": ["SHA256", "SHA384", "SHA512"],
+        "require_certificate_chain": true,
+        "max_certificate_age_days": 365,
+        "require_hsm_for_critical": true,
+        "publish_to_ipfs": true,
+        "generate_attestations": true
+      },
+      "fips": {
+        "require_timestamp": true,
+        "allow_self_signed": false,
+        "min_key_size": 2048,
+        "allowed_algorithms": ["SHA256", "SHA384", "SHA512"],
+        "require_certificate_chain": true,
+        "max_certificate_age_days": 365,
+        "require_hsm": true,
+        "fips_140_2_compliance": true,
+        "publish_to_ipfs": true,
+        "generate_attestations": true,
+        "require_did_attestation": true
+      }
+    }
+  },
+  
+  "c2pa": {
+    "enabled": true,
+    "default_embed": true,
+    "supported_formats": ["jpg", "jpeg", "png", "webp", "pdf", "mp4", "jar", "exe", "bin"],
+    "manifest_settings": {
+      "include_provenance": true,
+      "include_thumbnails": true,
+      "compression_level": 6,
+      "signer_name": "Noosphere Technologies",
+      "organization": "Noosphere Technologies Inc."
+    }
+  },
+  
+  "attestations": {
+    "slsa": {
+      "enabled": true,
+      "default_level": "3",
+      "builder_id": "https://github.com/noosphere-technologies/code-signing-mcp",
+      "build_type": "https://github.com/noosphere-technologies/code-signing-mcp/build-type/v1"
+    },
+    "in_toto": {
+      "enabled": true,
+      "layout_key": "${IN_TOTO_LAYOUT_KEY}",
+      "metadata_dir": "/var/lib/code-signing-mcp/attestations"
+    },
+    "did_attestations": {
+      "enabled": true,
+      "default_issuer": "did:web:noosphere.tech:codesigning",
+      "include_in_manifest": true
+    }
+  },
+  
+  "github": {
+    "integration": {
+      "enabled": true,
+      "webhook_secret": "${GITHUB_WEBHOOK_SECRET}",
+      "default_events": ["push", "release", "workflow_run"],
+      "auto_sign_releases": true,
+      "workflow_templates": {
+        "basic_signing": "/github-actions/sign-binary.yml",
+        "c2pa_signing": "/github-actions/sign-and-add-c2pa.yml",
+        "ipfs_publishing": "/github-actions/sign-and-publish-to-ipfs.yml"
+      }
+    },
+    "api": {
+      "token": "${GITHUB_TOKEN}",
+      "base_url": "https://api.github.com"
+    }
+  },
+  
+  "monitoring": {
+    "metrics": {
+      "enabled": true,
+      "endpoint": "/metrics",
+      "include_detailed_timing": true
+    },
+    "health_check": {
+      "enabled": true,
+      "endpoint": "/health", 
+      "check_services": true,
+      "check_credentials": true
+    },
+    "tracing": {
+      "enabled": false,
+      "jaeger_endpoint": "http://localhost:14268/api/traces"
+    }
+  },
+  
+  "storage": {
+    "temp_dir": "/tmp/code-signing-mcp",
+    "cache_dir": "/var/cache/code-signing-mcp", 
+    "cache_ttl": 3600,
+    "max_cache_size": "1GB"
+  },
+  
+  "features": {
+    "experimental": {
+      "quantum_resistant_signatures": false,
+      "distributed_signing": false,
+      "ai_policy_recommendations": false
+    },
+    "integrations": {
+      "github_actions_templates": true,
+      "ipfs_publishing": true,
+      "did_vc_support": true,
+      "c2pa_embedding": true
+    }
+  }
+}
