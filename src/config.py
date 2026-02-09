@@ -267,12 +267,80 @@ class FeaturesConfig(BaseModel):
     experimental: ExperimentalFeaturesConfig = field(default_factory=ExperimentalFeaturesConfig)
 
 
+class NoosphereProviderConfig(BaseModel):
+    """Noosphere Digital Integrity Platform provider configuration."""
+    enabled: bool = True
+    c2pa_service_url: str = "https://artifact-service.noosphere.tech"
+    did_service_url: str = "https://did.noosphere.tech"
+    vc_service_url: str = "https://vc.noosphere.tech"
+    api_key: Optional[str] = None
+    default_policy: str = "enterprise"
+
+
+class SignPathProviderConfig(BaseModel):
+    """SignPath.io provider configuration."""
+    enabled: bool = False
+    connector_url: str = "https://app.signpath.io"
+    organization_id: Optional[str] = None
+    api_token: Optional[str] = None
+    project_slug: str = "default"
+    signing_policy_slug: str = "release-signing"
+
+
+class SigstoreProviderConfig(BaseModel):
+    """Sigstore provider configuration."""
+    enabled: bool = True
+    use_production: bool = True
+    oidc_issuer: str = "https://oauth2.sigstore.dev/auth"
+    identity_token: Optional[str] = None
+
+
+class LocalProviderConfig(BaseModel):
+    """Local signing provider configuration."""
+    enabled: bool = True
+    key_path: str = "./keys/signing.pem"
+    key_password: Optional[str] = None
+    key_type: str = "ed25519"
+    tsa_url: Optional[str] = None
+    generate_if_missing: bool = True
+
+
+class ProvidersConfig(BaseModel):
+    """
+    Signing providers configuration.
+
+    Supports multiple pluggable providers:
+    - noosphere: Full-featured (C2PA, in-toto, DID, VC)
+    - signpath: Enterprise Windows signing
+    - sigstore: Open source keyless signing
+    - local: Offline signing with local keys
+    """
+    default: str = "noosphere"
+    noosphere: NoosphereProviderConfig = field(default_factory=NoosphereProviderConfig)
+    signpath: SignPathProviderConfig = field(default_factory=SignPathProviderConfig)
+    sigstore: SigstoreProviderConfig = field(default_factory=SigstoreProviderConfig)
+    local: LocalProviderConfig = field(default_factory=LocalProviderConfig)
+
+    def to_factory_config(self) -> Dict[str, Any]:
+        """Convert to format expected by ProviderFactory."""
+        return {
+            "default": self.default,
+            "available": {
+                "noosphere": self.noosphere.dict(),
+                "signpath": self.signpath.dict(),
+                "sigstore": self.sigstore.dict(),
+                "local": self.local.dict(),
+            }
+        }
+
+
 class Config(BaseModel):
     """Main configuration class."""
     server: ServerConfig = field(default_factory=ServerConfig)
-    services: ServicesConfig
+    services: Optional[ServicesConfig] = None  # Made optional - providers handle services now
+    providers: ProvidersConfig = field(default_factory=ProvidersConfig)
     credentials: Dict[str, CredentialConfig] = field(default_factory=dict)
-    signing: SigningConfig
+    signing: Optional[SigningConfig] = None  # Made optional - providers handle this now
     security: SecurityConfig = field(default_factory=SecurityConfig)
     policies: PoliciesConfig = field(default_factory=PoliciesConfig)
     c2pa: C2PAConfig = field(default_factory=C2PAConfig)
@@ -291,13 +359,36 @@ class Config(BaseModel):
             if cred.type == "cloud_kms" and not cred.provider:
                 raise ValueError(f"Cloud KMS credential {cred_id} missing provider")
         return v
-    
+
     @validator('signing')
     def validate_signing_config(cls, v, values):
         """Validate signing configuration."""
+        if v is None:
+            return v  # Optional now - providers handle signing config
         credentials = values.get('credentials', {})
-        if v.default_credential not in credentials:
+        if credentials and v.default_credential not in credentials:
             raise ValueError(f"Default credential {v.default_credential} not found in credentials")
+        return v
+
+    @validator('providers')
+    def validate_providers(cls, v):
+        """Validate at least one provider is enabled."""
+        enabled = []
+        if v.noosphere.enabled:
+            enabled.append("noosphere")
+        if v.signpath.enabled:
+            enabled.append("signpath")
+        if v.sigstore.enabled:
+            enabled.append("sigstore")
+        if v.local.enabled:
+            enabled.append("local")
+
+        if not enabled:
+            raise ValueError("At least one provider must be enabled")
+
+        if v.default not in enabled:
+            raise ValueError(f"Default provider '{v.default}' is not enabled")
+
         return v
 
 
@@ -367,30 +458,23 @@ def load_config(config_path: Union[str, Path]) -> Config:
 def create_default_config() -> Config:
     """Create a default configuration for testing/development."""
     return Config(
-        services=ServicesConfig(
-            code_signing_agent=ServiceConfig(
-                url="http://localhost:8081",
-                timeout=300
+        providers=ProvidersConfig(
+            default="noosphere",
+            noosphere=NoosphereProviderConfig(
+                enabled=True,
+                c2pa_service_url="https://artifact-service.noosphere.tech",
+                did_service_url="https://did.noosphere.tech",
+                vc_service_url="https://vc.noosphere.tech"
             ),
-            c2pa_artifact=ServiceConfig(
-                url="http://localhost:8082",
-                timeout=120
+            sigstore=SigstoreProviderConfig(
+                enabled=True,
+                use_production=True
+            ),
+            local=LocalProviderConfig(
+                enabled=True,
+                key_path="./keys/signing.pem",
+                generate_if_missing=True
             )
-        ),
-        credentials={
-            "default_software_key": CredentialConfig(
-                id="default_software_key",
-                name="Default Software Key",
-                type="software",
-                security_level="standard",
-                keystore_path="/tmp/keystore.p12",
-                keystore_password="changeit",
-                key_alias="signing-key"
-            )
-        },
-        signing=SigningConfig(
-            default_credential="default_software_key",
-            default_timestamp_url="http://timestamp.digicert.com"
         )
     )
 

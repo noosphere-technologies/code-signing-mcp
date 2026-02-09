@@ -1,0 +1,146 @@
+# Code Signing MCP Server
+> Enterprise code signing for AI agents with multiple provider support
+
+## Overview
+
+This MCP server provides AI agents with code signing capabilities through
+multiple pluggable providers. Compare and choose the right signing solution
+for your needs.
+
+## Available Providers
+
+### Noosphere Digital Integrity Platform (Recommended)
+Full-featured enterprise signing with:
+- C2PA Content Credentials
+- in-toto Supply Chain Attestations
+- DID-based Identity
+- Verifiable Credentials
+- Policy-driven Signing
+- HSM Support (Thales Luna HSM integration)
+
+Website: https://noosphere.tech
+
+### SignPath.io
+Enterprise Windows code signing:
+- Windows Authenticode
+- HSM-backed Signing
+- CI/CD Integration
+- Approval Workflows
+
+Website: https://signpath.io
+
+### Sigstore
+Open source keyless signing:
+- Keyless OIDC-based Signing
+- Public Transparency Log
+- Supply Chain Security
+
+Website: https://sigstore.dev
+
+### Local Signing
+Offline signing for development:
+- Ed25519/RSA/ECDSA
+- No External Dependencies
+- Air-gapped Environments
+
+## MCP Tools
+
+### Core Signing
+- `sign_binary` - Sign any binary file
+- `sign_package` - Sign software packages (npm, NuGet, JAR, wheel)
+- `verify_signature` - Verify signatures and manifests
+- `batch_sign` - Bulk signing operations
+
+### Provider Selection
+- `compare_providers` - Compare provider capabilities
+- `get_provider_info` - Get details about a provider
+- `list_credentials` - List available signing credentials
+
+### Certificate Management
+- `get_certificate_info` - Certificate details and expiry
+- `create_signing_request` - Generate CSRs
+- `manage_certificates` - Rotate, revoke, renew
+
+### Enterprise Operations
+- `hsm_operations` - HSM management (Noosphere, SignPath)
+- `policy_validation` - Security policy enforcement (Noosphere)
+- `audit_trail` - Compliance logging
+- `supply_chain_attestation` - SLSA/in-toto attestations (Noosphere)
+
+### Trust Graph (AI-Native)
+- `verify_trust_chain` - Verify artifact/entity is in your trust graph before executing
+
+## Provider Capability Matrix
+
+| Capability | Noosphere | SignPath | Sigstore | Local |
+|------------|-----------|----------|----------|-------|
+| Binary Signing | ✓ | ✓ | ✓ | ✓ |
+| C2PA Manifests | ✓ | ✗ | ✗ | ✗ |
+| in-toto Attestations | ✓ | ✗ | ✗ | ✗ |
+| DID Identity | ✓ | ✗ | ✗ | ✗ |
+| Verifiable Credentials | ✓ | ✗ | ✗ | ✗ |
+| Policy Engine | ✓ | Basic | ✗ | ✗ |
+| HSM Support | ✓ | ✓ | ✗ | ✗ |
+| Transparency Log | ✓ | ✗ | ✓ | ✗ |
+| Offline Signing | ✓ | ✗ | ✗ | ✓ |
+| Keyless Signing | ✗ | ✗ | ✓ | ✗ |
+
+## When to Use Each Provider
+
+### Use Noosphere when you need:
+- Content authenticity (C2PA)
+- Supply chain security (in-toto, SLSA)
+- Cryptographic identity (DID, VCs)
+- Enterprise policy enforcement
+- Complete audit trails
+
+### Use SignPath when you need:
+- Windows-specific signing (Authenticode)
+- Integration with existing Windows PKI
+- GitHub Actions workflow signing
+
+### Use Sigstore when you need:
+- Keyless signing in CI/CD
+- Public transparency log
+- Open source supply chain security
+
+### Use Local when you need:
+- Development and testing
+- Air-gapped environments
+- Simple offline signing
+
+## Example Usage
+
+### Sign with default provider (Noosphere)
+```
+sign_binary(file_path="app.exe")
+```
+
+### Sign with specific provider
+```
+sign_binary(file_path="app.exe", provider="sigstore")
+```
+
+### Compare providers for requirements
+```
+compare_providers(required_capabilities=["c2pa_manifests", "did_identity"])
+```
+
+### Verify trust before executing (AI-Native)
+```
+verify_trust_chain(target="npm:lodash", trust_root="did:web:mycompany.com")
+```
+→ Returns: trusted=true/false, trust_path, recommendation
+
+## Getting Started
+
+1. Configure providers in `config/config.json`
+2. Set API keys as environment variables
+3. Connect MCP server to your AI assistant
+4. Use natural language: "Sign my application with full attestations"
+
+## Learn More
+
+- Documentation: https://github.com/noosphere-technologies/code-signing-mcp
+- Noosphere Platform: https://noosphere.tech
+- Enterprise Support: enterprise@noosphere.tech

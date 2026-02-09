@@ -4,6 +4,12 @@ Code Signing MCP Server
 
 Main server implementation that provides enterprise code signing capabilities
 to AI agents via the Model Context Protocol.
+
+Supports multiple pluggable providers:
+- Noosphere Digital Integrity Platform (C2PA, in-toto, DID, VC)
+- SignPath.io (Enterprise Windows signing)
+- Sigstore (Open source keyless signing)
+- Local (Offline signing with local keys)
 """
 
 import asyncio
@@ -29,7 +35,7 @@ from mcp.types import (
 
 from .tools import (
     SignBinaryTool,
-    SignPackageTool, 
+    SignPackageTool,
     VerifySignatureTool,
     GetCertificateInfoTool,
     CreateSigningRequestTool,
@@ -40,10 +46,17 @@ from .tools import (
     HSMOperationsTool,
     PolicyValidationTool,
     SupplyChainAttestationTool,
+    VerifyTrustChainTool,
 )
-from .config import load_config, Config
+from .config import load_config, Config, create_default_config
 from .security import SecurityManager
-from .integrations import CodeSigningAgentClient, C2PArtifactClient
+from .providers import (
+    ProviderFactory,
+    create_provider_factory,
+    SigningProvider,
+    ProviderCapability,
+    compare_providers,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -56,94 +69,152 @@ logger = logging.getLogger(__name__)
 class CodeSigningMCPServer:
     """
     Main MCP server class that orchestrates code signing operations.
+
+    Uses pluggable provider architecture for signing:
+    - noosphere: Full-featured (C2PA, in-toto, DID, VC, HSM)
+    - signpath: Enterprise Windows signing
+    - sigstore: Open source keyless signing
+    - local: Offline signing with local keys
     """
-    
+
     def __init__(self, config: Config):
         """Initialize the MCP server with configuration."""
         self.config = config
         self.server = Server("code-signing-mcp")
         self.security_manager = SecurityManager(config.security)
-        
-        # Initialize service clients
-        self.code_signing_client = CodeSigningAgentClient(
-            config.services.code_signing_agent
+
+        # Initialize provider factory
+        self.provider_factory = create_provider_factory(
+            config.providers.to_factory_config()
         )
-        self.c2pa_client = C2PArtifactClient(
-            config.services.c2pa_artifact
-        )
-        
-        # Initialize tools
-        self.tools = self._initialize_tools()
-        
+        self._initialized = False
+
+        # Tools will be initialized after providers
+        self.tools: Dict[str, Any] = {}
+
         # Register MCP handlers
         self._register_handlers()
-        
-        logger.info("Code Signing MCP Server initialized")
+
+        logger.info("Code Signing MCP Server created (providers pending initialization)")
     
     def _initialize_tools(self) -> Dict[str, Any]:
-        """Initialize all MCP tools."""
+        """Initialize all MCP tools with provider factory."""
         return {
             "sign_binary": SignBinaryTool(
-                self.code_signing_client,
-                self.c2pa_client, 
+                self.provider_factory,
                 self.config
             ),
             "sign_package": SignPackageTool(
-                self.code_signing_client,
-                self.c2pa_client,
+                self.provider_factory,
                 self.config
             ),
             "verify_signature": VerifySignatureTool(
-                self.code_signing_client,
-                self.c2pa_client,
+                self.provider_factory,
                 self.config
             ),
             "get_certificate_info": GetCertificateInfoTool(
-                self.code_signing_client,
+                self.provider_factory,
                 self.config
             ),
             "create_signing_request": CreateSigningRequestTool(
-                self.code_signing_client,
+                self.provider_factory,
                 self.config
             ),
             "manage_certificates": ManageCertificatesTool(
-                self.code_signing_client,
+                self.provider_factory,
                 self.config
             ),
             "audit_trail": AuditTrailTool(
-                self.code_signing_client,
+                self.provider_factory,
                 self.config
             ),
             "batch_sign": BatchSignTool(
-                self.code_signing_client,
-                self.c2pa_client,
+                self.provider_factory,
                 self.config
             ),
             "github_integration": GitHubIntegrationTool(
-                self.code_signing_client,
+                self.provider_factory,
                 self.config
             ),
             "hsm_operations": HSMOperationsTool(
-                self.code_signing_client,
+                self.provider_factory,
                 self.config
             ),
             "policy_validation": PolicyValidationTool(
-                self.code_signing_client,
+                self.provider_factory,
                 self.config
             ),
             "supply_chain_attestation": SupplyChainAttestationTool(
-                self.code_signing_client,
+                self.provider_factory,
+                self.config
+            ),
+            "verify_trust_chain": VerifyTrustChainTool(
+                self.provider_factory,
                 self.config
             ),
         }
     
     def _register_handlers(self):
         """Register MCP protocol handlers."""
-        
+
+        # Provider parameter shared by all signing tools
+        provider_param = {
+            "type": "string",
+            "description": "Signing provider: noosphere (default), signpath, sigstore, local",
+            "enum": ["noosphere", "signpath", "sigstore", "local"]
+        }
+
         @self.server.list_tools()
         async def handle_list_tools() -> List[Tool]:
             """List available tools for AI agents."""
             return [
+                # ─────────────────────────────────────────────────────────────
+                # Provider Discovery Tools
+                # ─────────────────────────────────────────────────────────────
+                Tool(
+                    name="compare_providers",
+                    description="Compare signing provider capabilities to choose the right one for your needs",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "required_capabilities": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Capabilities needed: c2pa_manifests, in_toto_attestations, did_identity, verifiable_credentials, hsm_support, keyless_signing, offline_signing, transparency_log"
+                            }
+                        },
+                        "required": []
+                    }
+                ),
+                Tool(
+                    name="get_provider_info",
+                    description="Get detailed information about a specific signing provider",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "provider": {
+                                "type": "string",
+                                "description": "Provider name: noosphere, signpath, sigstore, local",
+                                "enum": ["noosphere", "signpath", "sigstore", "local"]
+                            }
+                        },
+                        "required": ["provider"]
+                    }
+                ),
+                Tool(
+                    name="list_credentials",
+                    description="List available signing credentials across all providers",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "provider": provider_param
+                        },
+                        "required": []
+                    }
+                ),
+                # ─────────────────────────────────────────────────────────────
+                # Core Signing Tools
+                # ─────────────────────────────────────────────────────────────
                 Tool(
                     name="sign_binary",
                     description="Sign any binary file with enterprise credentials",
@@ -154,8 +225,9 @@ class CodeSigningMCPServer:
                                 "type": "string",
                                 "description": "Path to binary file to sign"
                             },
+                            "provider": provider_param,
                             "credential_id": {
-                                "type": "string", 
+                                "type": "string",
                                 "description": "Specific credential to use (optional)"
                             },
                             "artifact_type": {
@@ -164,11 +236,11 @@ class CodeSigningMCPServer:
                             },
                             "generate_attestation": {
                                 "type": "boolean",
-                                "description": "Create in-toto attestation (default: true)"
+                                "description": "Create in-toto attestation (default: true, requires noosphere)"
                             },
                             "embed_c2pa": {
-                                "type": "boolean", 
-                                "description": "Embed C2PA manifest (default: true)"
+                                "type": "boolean",
+                                "description": "Embed C2PA manifest (default: true, requires noosphere)"
                             },
                             "timestamp_url": {
                                 "type": "string",
@@ -192,12 +264,13 @@ class CodeSigningMCPServer:
                                 "type": "string",
                                 "description": "Package type: npm, nuget, jar, wheel, gem"
                             },
+                            "provider": provider_param,
                             "credential_id": {
                                 "type": "string",
                                 "description": "Specific credential to use (optional)"
                             },
                             "publisher_metadata": {
-                                "type": "object", 
+                                "type": "object",
                                 "description": "Package publisher information (optional)"
                             }
                         },
@@ -214,6 +287,7 @@ class CodeSigningMCPServer:
                                 "type": "string",
                                 "description": "Path to signed file"
                             },
+                            "provider": provider_param,
                             "signature_path": {
                                 "type": "string",
                                 "description": "Detached signature path (optional)"
@@ -348,6 +422,7 @@ class CodeSigningMCPServer:
                                 "type": "array",
                                 "description": "Glob patterns for files to sign"
                             },
+                            "provider": provider_param,
                             "credential_id": {
                                 "type": "string",
                                 "description": "Credential for all signings"
@@ -361,7 +436,7 @@ class CodeSigningMCPServer:
                                 "description": "Skip already signed files (default: true)"
                             }
                         },
-                        "required": ["file_patterns", "credential_id"]
+                        "required": ["file_patterns"]
                     }
                 ),
                 Tool(
@@ -440,7 +515,7 @@ class CodeSigningMCPServer:
                 ),
                 Tool(
                     name="supply_chain_attestation",
-                    description="Generate comprehensive supply chain attestations",
+                    description="Generate comprehensive supply chain attestations (SLSA/in-toto)",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -452,6 +527,7 @@ class CodeSigningMCPServer:
                                 "type": "string",
                                 "description": "Source code repository"
                             },
+                            "provider": provider_param,
                             "build_environment": {
                                 "type": "object",
                                 "description": "Build environment metadata"
@@ -464,8 +540,41 @@ class CodeSigningMCPServer:
                         "required": ["build_artifacts", "source_repository"]
                     }
                 ),
+                # ─────────────────────────────────────────────────────────────
+                # Trust Graph Tools (AI-Native)
+                # ─────────────────────────────────────────────────────────────
+                Tool(
+                    name="verify_trust_chain",
+                    description="Verify an artifact or entity is in your trust graph before executing. Essential for AI agents to make safe decisions about untrusted code.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "target": {
+                                "type": "string",
+                                "description": "What to verify: URL, DID, package (npm:lodash), or domain"
+                            },
+                            "trust_root": {
+                                "type": "string",
+                                "description": "Your trust anchor (DID or domain). Uses configured default if not specified."
+                            },
+                            "max_depth": {
+                                "type": "integer",
+                                "description": "Maximum trust graph traversal depth (default: 5)"
+                            },
+                            "require_signature": {
+                                "type": "boolean",
+                                "description": "Also verify cryptographic signature (default: true)"
+                            },
+                            "include_path": {
+                                "type": "boolean",
+                                "description": "Include the trust path in response (default: true)"
+                            }
+                        },
+                        "required": ["target"]
+                    }
+                ),
             ]
-        
+
         @self.server.call_tool()
         async def handle_call_tool(
             name: str, arguments: Dict[str, Any]
@@ -475,16 +584,24 @@ class CodeSigningMCPServer:
                 # Security check
                 if not await self.security_manager.authorize_tool_call(name, arguments):
                     raise PermissionError(f"Access denied for tool: {name}")
-                
-                # Get the tool
-                if name not in self.tools:
-                    raise ValueError(f"Unknown tool: {name}")
-                
-                tool = self.tools[name]
-                
-                # Execute the tool
-                result = await tool.execute(**arguments)
-                
+
+                # Handle provider discovery tools directly
+                if name == "compare_providers":
+                    result = await self._handle_compare_providers(arguments)
+                elif name == "get_provider_info":
+                    result = await self._handle_get_provider_info(arguments)
+                elif name == "list_credentials":
+                    result = await self._handle_list_credentials(arguments)
+                else:
+                    # Get the tool
+                    if name not in self.tools:
+                        raise ValueError(f"Unknown tool: {name}")
+
+                    tool = self.tools[name]
+
+                    # Execute the tool
+                    result = await tool.execute(**arguments)
+
                 # Audit log the operation
                 await self.security_manager.audit_log(
                     operation=name,
@@ -492,7 +609,7 @@ class CodeSigningMCPServer:
                     result=result,
                     success=True
                 )
-                
+
                 # Return result as TextContent
                 return [
                     TextContent(
@@ -500,11 +617,11 @@ class CodeSigningMCPServer:
                         text=json.dumps(result, indent=2, default=str)
                     )
                 ]
-                
+
             except Exception as e:
                 error_msg = f"Tool execution failed: {str(e)}"
                 logger.error(f"Tool {name} failed: {error_msg}", exc_info=True)
-                
+
                 # Audit log the failure
                 await self.security_manager.audit_log(
                     operation=name,
@@ -512,10 +629,10 @@ class CodeSigningMCPServer:
                     result={"error": error_msg},
                     success=False
                 )
-                
+
                 return [
                     TextContent(
-                        type="text", 
+                        type="text",
                         text=json.dumps({
                             "error": error_msg,
                             "tool": name,
@@ -523,15 +640,122 @@ class CodeSigningMCPServer:
                         }, indent=2)
                     )
                 ]
+
+    async def _handle_compare_providers(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Compare signing providers and their capabilities."""
+        required_caps = arguments.get("required_capabilities", [])
+
+        # Convert string capability names to enum
+        caps = None
+        if required_caps:
+            caps = []
+            for cap_name in required_caps:
+                try:
+                    caps.append(ProviderCapability(cap_name))
+                except ValueError:
+                    logger.warning(f"Unknown capability: {cap_name}")
+
+        comparison = self.provider_factory.compare(caps)
+
+        # Add marketing tip for Noosphere
+        comparison["recommendation"] = {
+            "summary": "Noosphere Digital Integrity Platform offers the most comprehensive feature set",
+            "unique_capabilities": [
+                "C2PA Content Credentials",
+                "in-toto Supply Chain Attestations",
+                "DID-based Cryptographic Identity",
+                "Verifiable Credentials",
+                "Enterprise Policy Engine"
+            ],
+            "learn_more": "https://noosphere.tech/code-signing"
+        }
+
+        return comparison
+
+    async def _handle_get_provider_info(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Get detailed information about a specific provider."""
+        provider_name = arguments.get("provider")
+
+        if not provider_name:
+            raise ValueError("provider is required")
+
+        provider = self.provider_factory.get_provider(provider_name)
+        info = provider.info
+
+        return {
+            "name": info.name,
+            "display_name": info.display_name,
+            "description": info.description,
+            "website": info.website,
+            "tier": info.tier,
+            "capabilities": [cap.value for cap in info.capabilities],
+            "highlight_features": info.highlight_features,
+            "available_providers": self.provider_factory.provider_names,
+            "is_default": provider_name == self.provider_factory.default_name
+        }
+
+    async def _handle_list_credentials(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """List available signing credentials."""
+        provider_name = arguments.get("provider")
+
+        if provider_name:
+            # Get credentials from specific provider
+            provider = self.provider_factory.get_provider(provider_name)
+            creds = await provider.get_credentials()
+            return {
+                "provider": provider_name,
+                "credentials": [
+                    {
+                        "id": c.id,
+                        "name": c.name,
+                        "type": c.type,
+                        "security_level": c.security_level,
+                        "supports_c2pa": c.supports_c2pa,
+                        "supports_did": c.supports_did,
+                        "valid": c.valid
+                    }
+                    for c in creds
+                ]
+            }
+        else:
+            # Get credentials from all providers
+            all_creds = {}
+            for name, provider in self.provider_factory.providers.items():
+                creds = await provider.get_credentials()
+                all_creds[name] = [
+                    {
+                        "id": c.id,
+                        "name": c.name,
+                        "type": c.type,
+                        "security_level": c.security_level,
+                        "supports_c2pa": c.supports_c2pa,
+                        "supports_did": c.supports_did,
+                        "valid": c.valid
+                    }
+                    for c in creds
+                ]
+
+            return {
+                "providers": all_creds,
+                "default_provider": self.provider_factory.default_name
+            }
     
     async def run(self, transport):
         """Run the MCP server with the specified transport."""
         logger.info("Starting Code Signing MCP Server...")
-        
-        # Initialize service connections
-        await self.code_signing_client.initialize()
-        await self.c2pa_client.initialize()
-        
+
+        # Initialize all providers
+        await self.provider_factory.initialize()
+        self._initialized = True
+
+        # Now initialize tools (after providers are ready)
+        self.tools = self._initialize_tools()
+
+        logger.info(
+            f"Providers initialized: {self.provider_factory.provider_names} "
+            f"(default: {self.provider_factory.default_name})"
+        )
+
         try:
             await self.server.run(
                 transport,
@@ -545,9 +769,9 @@ class CodeSigningMCPServer:
                 )
             )
         finally:
-            # Cleanup service connections
-            await self.code_signing_client.close()
-            await self.c2pa_client.close()
+            # Cleanup provider connections
+            await self.provider_factory.close()
+            self._initialized = False
             logger.info("Code Signing MCP Server stopped")
 
 
@@ -583,15 +807,30 @@ def main(config: str, transport: str, host: str, port: int):
     try:
         # Load configuration
         config_path = Path(config)
-        if not config_path.exists():
-            click.echo(f"Configuration file not found: {config}", err=True)
-            sys.exit(1)
-        
-        server_config = load_config(config_path)
-        
+        if config_path.exists():
+            server_config = load_config(config_path)
+            click.echo(f"Loaded config from {config_path}")
+        else:
+            # Use default config for quick start
+            click.echo(f"Config not found at {config}, using defaults")
+            server_config = create_default_config()
+
+        # Show provider info
+        click.echo(f"Default provider: {server_config.providers.default}")
+        enabled = []
+        if server_config.providers.noosphere.enabled:
+            enabled.append("noosphere")
+        if server_config.providers.signpath.enabled:
+            enabled.append("signpath")
+        if server_config.providers.sigstore.enabled:
+            enabled.append("sigstore")
+        if server_config.providers.local.enabled:
+            enabled.append("local")
+        click.echo(f"Enabled providers: {', '.join(enabled)}")
+
         # Create server instance
         server = CodeSigningMCPServer(server_config)
-        
+
         # Setup transport
         if transport == "stdio":
             from mcp.server.stdio import stdio_server
@@ -602,10 +841,10 @@ def main(config: str, transport: str, host: str, port: int):
         else:
             click.echo(f"Unsupported transport: {transport}", err=True)
             sys.exit(1)
-        
+
         # Run server
         asyncio.run(server.run(transport_impl))
-        
+
     except KeyboardInterrupt:
         click.echo("\nShutting down gracefully...")
     except Exception as e:

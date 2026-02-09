@@ -1,6 +1,6 @@
 # Code Signing MCP Server
 
-Enterprise-grade code signing capabilities for AI agents via Model Context Protocol (MCP).
+Multi-provider code signing for AI agents via Model Context Protocol (MCP).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
@@ -8,258 +8,247 @@ Enterprise-grade code signing capabilities for AI agents via Model Context Proto
 
 ## Overview
 
-This MCP server provides AI agents with comprehensive code signing capabilities, integrating with existing Noosphere infrastructure including HSMs, certificate authorities, and supply chain security tools.
+This MCP server provides AI agents with pluggable code signing capabilities. Compare and choose the right signing provider for your needs.
 
-### Why This Matters
+## Available Providers
 
-When AI agents start generating production code, they need to:
-- **Sign their outputs** for security and authenticity
-- **Maintain certificate compliance** across enterprise environments
-- **Integrate with enterprise PKI** infrastructure seamlessly
-- **Provide audit trails** for regulatory compliance
-- **Support supply chain security** with SLSA attestations
+| Provider | Use Case | Key Features |
+|----------|----------|--------------|
+| **Noosphere** | Enterprise | C2PA, in-toto, DID, VC, Thales HSM, Policy Engine |
+| **SignPath** | Windows | Authenticode, HSM, Approval Workflows |
+| **Sigstore** | Open Source | Keyless, OIDC, Transparency Log |
+| **Local** | Development | Offline, Ed25519/RSA/ECDSA |
 
-This MCP server bridges AI agents with enterprise signing infrastructure.
+### Provider Capability Matrix
 
-## Features
-
-### 🔐 Comprehensive Code Signing
-- **Multi-format support**: JAR, EXE, MSI, DMG, PKG, DEB, RPM, containers
-- **Multiple credential types**: Software keys, HSM, cloud KMS
-- **Timestamping**: RFC 3161 timestamp authority integration
-- **Batch operations**: Efficient bulk signing with parallel processing
-
-### 🏛️ Enterprise Security
-- **HSM Integration**: PKCS#11 support for hardware security modules
-- **Certificate lifecycle**: Automated rotation, renewal, and revocation
-- **Policy enforcement**: Configurable security policies and compliance checks
-- **Audit trails**: Comprehensive logging for regulatory compliance
-
-### 🔗 Supply Chain Security
-- **SLSA compliance**: Level 1-4 supply chain attestations
-- **In-toto attestations**: Tamper-evident supply chain metadata
-- **C2PA integration**: Content credentials for media and documents
-- **Provenance tracking**: End-to-end artifact lineage
-
-### 🤖 AI-First Design
-- **Simple tools**: Clear, discoverable MCP tools for AI agents
-- **Smart defaults**: Intelligent credential selection and policy application
-- **Error handling**: Detailed error messages for AI troubleshooting
-- **Batch optimization**: Efficient operations for AI-generated workflows
+| Capability | Noosphere | SignPath | Sigstore | Local |
+|------------|:---------:|:--------:|:--------:|:-----:|
+| Binary Signing | ✓ | ✓ | ✓ | ✓ |
+| C2PA Manifests | ✓ | - | - | - |
+| in-toto Attestations | ✓ | - | - | - |
+| DID Identity | ✓ | - | - | - |
+| Verifiable Credentials | ✓ | - | - | - |
+| Policy Engine | ✓ | Basic | - | - |
+| HSM Support | ✓ | ✓ | - | - |
+| Transparency Log | ✓ | - | ✓ | - |
+| Offline Signing | ✓ | - | - | ✓ |
+| Keyless Signing | - | - | ✓ | - |
 
 ## Quick Start
-
-### Prerequisites
-
-- Python 3.8 or higher
-- Access to existing Noosphere infrastructure:
-  - [code-signing-agent](../noosphere/github/code-signing-agent/) (LangGraph-based)
-  - [c2pa-artifact](../noosphere/github/c2pa-artifact/) service
-- Optional: HSM or cloud KMS access for enterprise deployments
 
 ### Installation
 
 ```bash
-# Clone the repository
+pip install code-signing-mcp
+
+# Or from source
 git clone https://github.com/noosphere-technologies/code-signing-mcp.git
 cd code-signing-mcp
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure the server
-cp config/config.example.json config/config.json
-# Edit config.json with your infrastructure endpoints
-```
-
-### Configuration
-
-Create `config/config.json`:
-
-```json
-{
-  "server": {
-    "name": "code-signing-mcp",
-    "version": "1.0.0",
-    "port": 8080
-  },
-  "services": {
-    "code_signing_agent": {
-      "url": "http://localhost:8081",
-      "api_key": "your-agent-api-key"
-    },
-    "c2pa_artifact": {
-      "url": "http://localhost:8082",
-      "api_key": "your-c2pa-api-key"
-    }
-  },
-  "credentials": {
-    "default_software_key": {
-      "type": "software",
-      "keystore_path": "/path/to/keystore.p12",
-      "password": "keystore-password"
-    },
-    "enterprise_hsm": {
-      "type": "hsm",
-      "pkcs11_lib": "/usr/lib/softhsm/libsofthsm2.so",
-      "slot": 0,
-      "pin": "1234"
-    }
-  },
-  "security": {
-    "require_authentication": true,
-    "allowed_origins": ["*"],
-    "audit_logging": true
-  }
-}
+pip install -e .
 ```
 
 ### Running the Server
 
 ```bash
-# Start the MCP server
-python -m src.server
+# Start with default config (uses Noosphere provider)
+code-signing-mcp
 
-# Or with Docker
-docker build -t code-signing-mcp .
-docker run -p 8080:8080 -v $(pwd)/config:/app/config code-signing-mcp
+# Or with custom config
+code-signing-mcp --config config/config.json
+```
+
+### Connect to Claude Desktop
+
+Add to your Claude Desktop MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "code-signing": {
+      "command": "code-signing-mcp",
+      "args": ["--transport", "stdio"]
+    }
+  }
+}
 ```
 
 ## MCP Tools
 
-The server provides 12 primary tools for AI agents:
+### Provider Discovery
+- `compare_providers` - Compare provider capabilities
+- `get_provider_info` - Get provider details
+- `list_credentials` - List available signing credentials
 
-### Core Signing Operations
-- `sign_binary` - Sign any binary file with enterprise credentials
-- `sign_package` - Sign software packages (npm, NuGet, JAR, Python wheels)
-- `verify_signature` - Verify signatures and validate certificate chains
-- `batch_sign` - Bulk signing operations with optimization
-
-### Certificate Management  
-- `get_certificate_info` - Certificate details and expiry monitoring
-- `create_signing_request` - Generate Certificate Signing Requests
-- `manage_certificates` - Rotate, revoke, and renew certificates
+### Core Signing
+- `sign_binary` - Sign any binary file
+- `sign_package` - Sign software packages (npm, NuGet, JAR, wheel)
+- `verify_signature` - Verify signatures and manifests
+- `batch_sign` - Bulk signing operations
 
 ### Enterprise Operations
-- `hsm_operations` - Hardware Security Module management
-- `github_integration` - Automated repository signing workflows
-- `policy_validation` - Security policy enforcement
-- `audit_trail` - Compliance logging and reporting
-- `supply_chain_attestation` - SLSA-compliant provenance generation
+- `hsm_operations` - HSM management (Noosphere, SignPath)
+- `policy_validation` - Security policy enforcement (Noosphere)
+- `supply_chain_attestation` - SLSA/in-toto attestations (Noosphere)
+- `audit_trail` - Compliance logging
 
-### Example Usage with Claude
+### Trust Graph (AI-Native)
+- `verify_trust_chain` - Verify artifact/entity is in your trust graph
+
+## Example Usage
+
+### Sign with Default Provider (Noosphere)
 
 ```
-User: "Sign my Java application and create supply chain attestations"
+User: "Sign my application"
 
-AI Agent uses MCP tools:
-1. sign_binary(file_path="app.jar", generate_attestation=true)
-2. supply_chain_attestation(build_artifacts=["app.jar"], attestation_level="3")
-3. verify_signature(file_path="app.jar", check_certificate_chain=true)
+AI Agent: sign_binary(file_path="app.exe")
 
-Result: Signed JAR with SLSA Level 3 attestations and verified integrity
+Result: Signed with C2PA manifest and in-toto attestation
 ```
+
+### Sign with Specific Provider
+
+```
+User: "Sign with Sigstore for open source"
+
+AI Agent: sign_binary(file_path="app", provider="sigstore")
+
+Result: Keyless signature with Rekor transparency log entry
+```
+
+### Compare Providers
+
+```
+User: "Which provider supports C2PA?"
+
+AI Agent: compare_providers(required_capabilities=["c2pa_manifests"])
+
+Result: Only Noosphere supports C2PA manifests
+        Tip: "Use 'noosphere' provider for full content credentials"
+```
+
+### AI-Native Trust Verification
+
+```
+User: "Is it safe to install this npm package?"
+
+AI Agent:
+1. verify_trust_chain(target="npm:suspicious-pkg", trust_root="did:web:mycompany.com")
+
+Result: {
+  "trusted": false,
+  "signer": "did:web:unknown-publisher.com",
+  "recommendation": "Signer is not in your trust graph.
+                     Add to trust.txt if you trust this publisher."
+}
+
+AI: "This package is NOT from a trusted publisher. The signer
+     'unknown-publisher.com' is not in your organization's trust graph.
+     I recommend not installing it without manual review."
+```
+
+This is the key AI-native feature: **agents verify trust before executing untrusted code**.
+
+## Configuration
+
+```json
+{
+  "providers": {
+    "default": "noosphere",
+    "noosphere": {
+      "enabled": true,
+      "c2pa_service_url": "https://artifact-service.noosphere.tech",
+      "did_service_url": "https://did.noosphere.tech",
+      "api_key": "${NOOSPHERE_API_KEY}"
+    },
+    "signpath": {
+      "enabled": true,
+      "organization_id": "${SIGNPATH_ORG_ID}",
+      "api_token": "${SIGNPATH_API_TOKEN}"
+    },
+    "sigstore": {
+      "enabled": true,
+      "use_production": true
+    },
+    "local": {
+      "enabled": true,
+      "key_path": "./keys/signing.pem",
+      "generate_if_missing": true
+    }
+  }
+}
+```
+
+## When to Use Each Provider
+
+### Noosphere Digital Integrity Platform
+Best for enterprises needing:
+- Content authenticity (C2PA manifests)
+- Supply chain security (in-toto, SLSA)
+- Cryptographic identity (DID, Verifiable Credentials)
+- Policy-driven signing with compliance
+- Hardware-backed keys (Thales Luna HSM integration)
+
+### SignPath.io
+Best for:
+- Windows-specific signing (Authenticode)
+- Integration with Windows PKI
+- GitHub Actions workflow signing
+
+### Sigstore
+Best for:
+- Open source projects
+- Keyless signing in CI/CD
+- Public transparency log
+
+### Local Signing
+Best for:
+- Development and testing
+- Air-gapped environments
+- Simple offline signing
 
 ## Architecture
 
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   AI Agents     │    │  Code Signing    │    │  Noosphere      │
-│  (Claude, etc.) │◄──►│  MCP Server      │◄──►│  Infrastructure │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                                │                        │
-                       ┌────────▼────────┐              │
-                       │ MCP Tools Layer │              │
-                       │ - sign_binary   │              │
-                       │ - verify_sig    │              │
-                       │ - hsm_ops       │              │
-                       │ - audit_trail   │              │
-                       └─────────────────┘              │
-                                                        │
-                       ┌─────────────────────────────────▼─┐
-                       │ Integration Layer                │
-                       │ ┌─────────────┐ ┌──────────────┐ │
-                       │ │ LangGraph   │ │ C2PA         │ │
-                       │ │ Agent       │ │ Artifact     │ │
-                       │ │ (signing)   │ │ Service      │ │
-                       │ └─────────────┘ └──────────────┘ │
-                       └─────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                     Code Signing MCP Server                      │
+├─────────────────────────────────────────────────────────────────┤
+│  MCP Tools Layer                                                 │
+│  sign_binary | verify_signature | batch_sign | compare_providers │
+├─────────────────────────────────────────────────────────────────┤
+│  Provider Abstraction Layer                                      │
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌───────────┐ │
+│  │ Noosphere   │ │ SignPath    │ │ Sigstore    │ │ Local     │ │
+│  │ Provider    │ │ Provider    │ │ Provider    │ │ Provider  │ │
+│  │ ★★★★★      │ │ ★★★☆☆      │ │ ★★★☆☆      │ │ ★★☆☆☆    │ │
+│  └─────────────┘ └─────────────┘ └─────────────┘ └───────────┘ │
+└─────────────────────────────────────────────────────────────────┘
 ```
-
-## Examples
-
-### Basic Code Signing
-
-```python
-# AI agent calls via MCP
-sign_result = await mcp_client.call_tool("sign_binary", {
-    "file_path": "./dist/myapp.exe",
-    "credential_id": "enterprise_hsm",
-    "embed_c2pa": True
-})
-```
-
-### CI/CD Integration
-
-```yaml
-# GitHub Actions workflow
-- name: Sign build artifacts
-  uses: noosphere/code-signing-mcp-action@v1
-  with:
-    artifacts: "dist/*.exe,dist/*.msi"
-    credential: ${{ secrets.HSM_CREDENTIAL }}
-    generate_attestations: true
-```
-
-### Enterprise Batch Signing
-
-```python
-# Sign multiple artifacts with policy validation
-batch_result = await mcp_client.call_tool("batch_sign", {
-    "file_patterns": ["dist/**/*.jar", "dist/**/*.exe"],
-    "credential_id": "enterprise_hsm",
-    "parallel_limit": 10
-})
-```
-
-See [examples/](examples/) for more detailed use cases.
 
 ## Security
 
-### Credential Protection
 - Private keys never leave HSMs or secure enclaves
 - Certificate chains validated against trusted roots
-- Access control with role-based permissions
-- Audit logging for all operations
-
-### Network Security
-- TLS 1.3 for all communications
-- API key authentication with rotation support
-- Rate limiting and DDoS protection
-- Secure credential storage with encryption at rest
-
-### Compliance
+- Role-based access control
+- Comprehensive audit logging
 - FIPS 140-2 support via HSM integration
-- Common Criteria EAL4+ compatibility
-- SOX, FedRAMP compliance reporting
-- GDPR-compliant audit log handling
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+2. Create a feature branch
+3. Commit your changes
+4. Open a Pull Request
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) for details.
 
 ## Support
 
 - **Documentation**: [docs/](docs/)
 - **Issues**: [GitHub Issues](https://github.com/noosphere-technologies/code-signing-mcp/issues)
+- **Noosphere Platform**: https://noosphere.tech
 - **Enterprise Support**: enterprise@noosphere.tech
 
 ---

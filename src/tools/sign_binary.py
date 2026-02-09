@@ -1,8 +1,8 @@
 """
 Sign Binary Tool
 
-Handles binary file signing by interfacing with the C2PA Artifact cloud service.
-Integrates with DID/VC infrastructure for identity and credential management.
+Handles binary file signing through pluggable provider architecture.
+Supports multiple providers: Noosphere, SignPath, Sigstore, Local.
 """
 
 import asyncio
@@ -12,26 +12,30 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import aiofiles
-import aiohttp
 
-from ..integrations.c2pa_client import C2PArtifactClient
-from ..integrations.did_client import DIDClient
-from ..security.policy_engine import PolicyEngine
+from ..providers import ProviderFactory, ProviderCapability
 from ..config import Config
 
 
 class SignBinaryTool:
-    """Tool for signing binary files using C2PA cloud service."""
-    
-    def __init__(self, c2pa_client: C2PArtifactClient, did_client: DIDClient, config: Config):
-        self.c2pa_client = c2pa_client
-        self.did_client = did_client
+    """
+    Tool for signing binary files using pluggable providers.
+
+    Providers:
+    - noosphere: Full-featured (C2PA, in-toto, DID, VC)
+    - signpath: Enterprise Windows signing
+    - sigstore: Open source keyless signing
+    - local: Offline signing with local keys
+    """
+
+    def __init__(self, provider_factory: ProviderFactory, config: Config):
+        self.provider_factory = provider_factory
         self.config = config
-        self.policy_engine = PolicyEngine(config.policies)
     
     async def execute(
         self,
         file_path: str,
+        provider: Optional[str] = None,
         credential_id: Optional[str] = None,
         artifact_type: Optional[str] = None,
         generate_attestation: bool = True,
@@ -40,57 +44,70 @@ class SignBinaryTool:
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Sign a binary file using the C2PA cloud service.
-        
+        Sign a binary file using the selected provider.
+
         Args:
             file_path: Path to the file to sign
+            provider: Signing provider (noosphere, signpath, sigstore, local)
             credential_id: Specific credential to use (optional)
             artifact_type: Type hint for the artifact
             generate_attestation: Whether to generate supply chain attestations
             embed_c2pa: Whether to embed C2PA manifests
             timestamp_url: Override timestamp authority URL
-            
+
         Returns:
             Dictionary containing signing results and metadata
         """
         try:
-            # 1. Validate file and permissions
+            # 1. Get the appropriate provider
+            signing_provider = self.provider_factory.get_provider(provider)
+
+            # 2. Validate file exists
             file_info = await self._validate_file(file_path)
-            
-            # 2. Get user identity from DID
-            user_did = await self.did_client.get_current_user_did()
-            
-            # 3. Select appropriate credential
-            credential = await self._select_credential(
-                user_did, credential_id, artifact_type, file_info
+
+            # 3. Check provider capabilities for requested features
+            capability_warnings = []
+            if embed_c2pa and not signing_provider.supports(ProviderCapability.C2PA_MANIFESTS):
+                capability_warnings.append({
+                    "feature": "embed_c2pa",
+                    "message": f"C2PA manifests not supported by {signing_provider.name}",
+                    "tip": "Use 'noosphere' provider for C2PA support"
+                })
+                embed_c2pa = False
+
+            if generate_attestation and not signing_provider.supports(ProviderCapability.IN_TOTO_ATTESTATIONS):
+                capability_warnings.append({
+                    "feature": "generate_attestation",
+                    "message": f"in-toto attestations not supported by {signing_provider.name}",
+                    "tip": "Use 'noosphere' provider for supply chain attestations"
+                })
+                generate_attestation = False
+
+            # 4. Prepare signing options
+            options = {
+                "artifact_type": artifact_type or file_info["type"],
+                "generate_attestation": generate_attestation,
+                "embed_c2pa": embed_c2pa,
+                "timestamp_url": timestamp_url,
+                "file_info": file_info
+            }
+
+            # 5. Call provider to sign
+            result = await signing_provider.sign(
+                file_path=file_path,
+                credential_id=credential_id,
+                options=options
             )
-            
-            # 4. Apply signing policies
-            policy_result = await self.policy_engine.validate_signing_request(
-                file_info, credential, user_did
-            )
-            if not policy_result.allowed:
-                raise PermissionError(f"Policy violation: {policy_result.reason}")
-            
-            # 5. Prepare signing request for C2PA service
-            signing_request = await self._prepare_signing_request(
-                file_path, file_info, credential, user_did, 
-                generate_attestation, embed_c2pa, timestamp_url
-            )
-            
-            # 6. Call C2PA cloud service
-            signing_result = await self.c2pa_client.sign_artifact(signing_request)
-            
-            # 7. Generate DID-based attestations if requested
-            if generate_attestation:
-                attestation = await self._generate_did_attestation(
-                    signing_result, user_did, credential
-                )
-                signing_result["did_attestation"] = attestation
-            
-            # 8. Return formatted result
-            return self._format_result(signing_result, file_info, credential)
-            
+
+            # 6. Format and return result
+            response = self._format_result(result, file_info, signing_provider.name)
+
+            # Add capability warnings if any
+            if capability_warnings:
+                response["capability_warnings"] = capability_warnings
+
+            return response
+
         except Exception as e:
             return {
                 "success": False,
@@ -102,26 +119,26 @@ class SignBinaryTool:
     async def _validate_file(self, file_path: str) -> Dict[str, Any]:
         """Validate file exists and get metadata."""
         path = Path(file_path)
-        
+
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
-        
+
         if not path.is_file():
             raise ValueError(f"Path is not a file: {file_path}")
-        
+
         # Get file metadata
         stat = path.stat()
         file_size = stat.st_size
-        
+
         # Calculate file hash
         hash_sha256 = hashlib.sha256()
         async with aiofiles.open(file_path, 'rb') as f:
             while chunk := await f.read(8192):
                 hash_sha256.update(chunk)
-        
+
         # Detect file type
         file_type = self._detect_file_type(path)
-        
+
         return {
             "path": str(path.absolute()),
             "name": path.name,
@@ -131,14 +148,14 @@ class SignBinaryTool:
             "extension": path.suffix.lower(),
             "modified_time": stat.st_mtime
         }
-    
+
     def _detect_file_type(self, path: Path) -> str:
         """Detect artifact type from file extension and content."""
         extension = path.suffix.lower()
-        
+
         type_mapping = {
             '.jar': 'java_archive',
-            '.war': 'web_archive', 
+            '.war': 'web_archive',
             '.exe': 'windows_executable',
             '.msi': 'windows_installer',
             '.dmg': 'macos_disk_image',
@@ -153,120 +170,38 @@ class SignBinaryTool:
             '.tar.gz': 'archive',
             '.tgz': 'archive'
         }
-        
+
         return type_mapping.get(extension, 'binary')
-    
-    async def _select_credential(
-        self, 
-        user_did: str, 
-        credential_id: Optional[str],
-        artifact_type: Optional[str],
-        file_info: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Select appropriate signing credential based on policies and context."""
-        
-        # If credential explicitly specified, validate and use it
-        if credential_id:
-            credential = await self.did_client.get_credential(user_did, credential_id)
-            if not credential:
-                raise ValueError(f"Credential not found: {credential_id}")
-            return credential
-        
-        # Otherwise, apply automatic credential selection
-        available_credentials = await self.did_client.get_available_credentials(user_did)
-        
-        # Apply credential selection policies
-        selected = await self.policy_engine.select_credential(
-            available_credentials, artifact_type or file_info["type"], file_info
-        )
-        
-        if not selected:
-            raise ValueError("No suitable credential found for this artifact")
-        
-        return selected
-    
-    async def _prepare_signing_request(
-        self,
-        file_path: str,
-        file_info: Dict[str, Any],
-        credential: Dict[str, Any], 
-        user_did: str,
-        generate_attestation: bool,
-        embed_c2pa: bool,
-        timestamp_url: Optional[str]
-    ) -> Dict[str, Any]:
-        """Prepare signing request for C2PA cloud service."""
-        
-        return {
-            "artifact": {
-                "file_path": file_path,
-                "name": file_info["name"],
-                "type": file_info["type"],
-                "size": file_info["size"],
-                "sha256": file_info["sha256"],
-                "metadata": {
-                    "extension": file_info["extension"],
-                    "modified_time": file_info["modified_time"]
-                }
-            },
-            "credential": {
-                "id": credential["id"],
-                "type": credential["type"],
-                "did": user_did,
-                "verification_method": credential.get("verification_method")
-            },
-            "signing_options": {
-                "timestamp_url": timestamp_url or self.config.signing.default_timestamp_url,
-                "embed_c2pa": embed_c2pa,
-                "generate_attestation": generate_attestation,
-                "policy_set": self.config.policies.default_policy_set,
-                "include_certificate_chain": True
-            },
-            "context": {
-                "user_did": user_did,
-                "mcp_server": "code-signing-mcp",
-                "version": "1.0.0",
-                "request_id": self._generate_request_id()
-            }
-        }
-    
-    async def _generate_did_attestation(
-        self,
-        signing_result: Dict[str, Any],
-        user_did: str,
-        credential: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Generate DID-based attestation for the signing operation."""
-        
-        attestation_payload = {
-            "type": "CodeSigningAttestation",
-            "issuer": user_did,
-            "subject": signing_result["artifact"]["sha256"],
-            "credential_used": credential["id"],
-            "timestamp": signing_result["timestamp"],
-            "signature_info": {
-                "algorithm": signing_result.get("signature_algorithm"),
-                "format": signing_result.get("signature_format"),
-                "c2pa_manifest": signing_result.get("c2pa_manifest_id")
-            }
-        }
-        
-        # Sign the attestation with user's DID
-        signed_attestation = await self.did_client.sign_attestation(
-            user_did, attestation_payload
-        )
-        
-        return signed_attestation
-    
+
     def _format_result(
         self,
-        signing_result: Dict[str, Any],
+        signing_result,
         file_info: Dict[str, Any],
-        credential: Dict[str, Any]
+        provider_name: str
     ) -> Dict[str, Any]:
         """Format the final result for MCP response."""
-        
-        return {
+        from ..providers import SigningResult
+
+        # Handle SigningResult dataclass or dict
+        if isinstance(signing_result, SigningResult):
+            result = signing_result
+            success = result.success
+            error = result.error
+        else:
+            # Dict fallback
+            success = signing_result.get("success", True)
+            error = signing_result.get("error")
+            result = signing_result
+
+        if not success:
+            return {
+                "success": False,
+                "error": error,
+                "provider": provider_name,
+                "timestamp": self._get_timestamp()
+            }
+
+        response = {
             "success": True,
             "artifact": {
                 "name": file_info["name"],
@@ -276,43 +211,36 @@ class SignBinaryTool:
                 "sha256": file_info["sha256"]
             },
             "signature": {
-                "format": signing_result.get("signature_format"),
-                "algorithm": signing_result.get("signature_algorithm"),
-                "timestamp": signing_result.get("timestamp"),
-                "certificate_fingerprint": signing_result.get("certificate_fingerprint")
+                "format": getattr(result, 'signature_format', None) or result.get("signature_format") if isinstance(result, dict) else result.signature_format,
+                "algorithm": getattr(result, 'signature_algorithm', None) or result.get("signature_algorithm") if isinstance(result, dict) else result.signature_algorithm,
+                "timestamp": getattr(result, 'timestamp', None) or result.get("timestamp") if isinstance(result, dict) else result.timestamp,
+                "certificate_fingerprint": getattr(result, 'certificate_fingerprint', None) or result.get("certificate_fingerprint") if isinstance(result, dict) else result.certificate_fingerprint
             },
-            "credential": {
-                "id": credential["id"],
-                "type": credential["type"],
-                "name": credential.get("name", "Unknown")
+            "provider": {
+                "name": provider_name,
+                "timestamp_authority": getattr(result, 'timestamp_authority', None) if hasattr(result, 'timestamp_authority') else None
             },
-            "c2pa": {
-                "manifest_embedded": signing_result.get("c2pa_manifest_embedded", False),
-                "manifest_id": signing_result.get("c2pa_manifest_id"),
-                "verification_url": signing_result.get("c2pa_verification_url")
-            },
-            "attestations": {
-                "slsa_generated": signing_result.get("slsa_attestation_generated", False),
-                "did_attestation": signing_result.get("did_attestation"),
-                "in_toto_link": signing_result.get("in_toto_link")
-            },
-            "policy_compliance": {
-                "policy_set": signing_result.get("policy_set_applied"),
-                "compliance_verified": True,
-                "violations": []
-            },
-            "metadata": {
-                "request_id": signing_result.get("request_id"),
-                "processing_time_ms": signing_result.get("processing_time_ms"),
-                "mcp_server_version": "1.0.0"
-            }
+            "metadata": getattr(result, 'provider_metadata', {}) if hasattr(result, 'provider_metadata') else {},
+            "timestamp": self._get_timestamp()
         }
-    
-    def _generate_request_id(self) -> str:
-        """Generate unique request ID."""
-        import uuid
-        return str(uuid.uuid4())
-    
+
+        # Add C2PA info if available
+        if hasattr(result, 'c2pa_manifest') and result.c2pa_manifest:
+            response["c2pa"] = {
+                "manifest_embedded": True,
+                "manifest": result.c2pa_manifest
+            }
+
+        # Add attestation info if available
+        if hasattr(result, 'attestation') and result.attestation:
+            response["attestations"] = result.attestation
+
+        # Add capability tips (soft sell for Noosphere)
+        if hasattr(result, 'capability_tips') and result.capability_tips:
+            response["provider_tip"] = result.capability_tips
+
+        return response
+
     def _get_timestamp(self) -> str:
         """Get current timestamp in ISO format."""
         from datetime import datetime, timezone

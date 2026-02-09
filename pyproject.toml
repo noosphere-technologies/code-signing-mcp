@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "code-signing-mcp"
-version = "1.0.0"
-description = "Enterprise code signing capabilities for AI agents via Model Context Protocol"
+version = "1.1.0"
+description = "Multi-provider code signing for AI agents via MCP - supports Noosphere, SignPath, Sigstore, and local signing"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -17,13 +17,19 @@ maintainers = [
 keywords = [
     "code-signing",
     "mcp",
-    "ai-agents", 
+    "ai-agents",
     "enterprise-security",
     "hsm",
     "certificates",
     "supply-chain",
     "slsa",
-    "c2pa"
+    "c2pa",
+    "in-toto",
+    "sigstore",
+    "signpath",
+    "noosphere",
+    "did",
+    "verifiable-credentials"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -87,7 +93,8 @@ dependencies = [
     
     # Async support
     "asyncio-mqtt>=0.13.0",
-    "anyio>=3.6.0"
+    "anyio>=3.6.0",
+    "aiofiles>=23.0.0"
 ]
 
 [project.optional-dependencies]
