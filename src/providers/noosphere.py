@@ -190,35 +190,43 @@ class NoosphereProvider(BaseProvider):
             # Select credential
             credential = await self._select_credential(credential_id, file_info)
 
-            # Build signing request
-            signing_request = {
-                "artifact": {
-                    "file_path": file_path,
+            # Step 1: Upload file to c2pa-artifact service
+            form = aiohttp.FormData()
+            form.add_field(
+                'file',
+                open(file_path, 'rb'),
+                filename=file_info["name"],
+                content_type='application/octet-stream'
+            )
+
+            async with self._session.post(
+                f"{self.c2pa_url}/api/upload",
+                data=form
+            ) as upload_response:
+                if upload_response.status != 200:
+                    error_text = await upload_response.text()
+                    return SigningResult(
+                        success=False,
+                        error=f"Upload failed: {error_text}",
+                        provider_name=self.name
+                    )
+                upload_result = await upload_response.json()
+                stored_filename = upload_result.get("stored_filename")
+
+            # Step 2: Process/sign the uploaded file
+            process_request = {
+                "filename": stored_filename,
+                "metadata": {
+                    "credential_id": credential.id,
                     "name": file_info["name"],
-                    "type": file_info["type"],
-                    "size": file_info["size"],
-                    "sha256": file_info["sha256"]
-                },
-                "credential": {
-                    "id": credential.id,
-                    "type": credential.type
-                },
-                "identity": {
-                    "did": user_did,
-                    "include_vc": options.get("include_vc", True)
-                },
-                "options": {
-                    "embed_c2pa": options.get("embed_c2pa", True),
-                    "generate_attestation": options.get("generate_did_attestation", True),
+                    "creator_did": user_did,
                     "policy": options.get("policy", self.default_policy),
-                    "timestamp_url": options.get("timestamp_url")
                 }
             }
 
-            # Call C2PA service
             async with self._session.post(
                 f"{self.c2pa_url}/api/process",
-                json=signing_request
+                json=process_request
             ) as response:
                 if response.status != 200:
                     error_text = await response.text()
@@ -230,29 +238,29 @@ class NoosphereProvider(BaseProvider):
 
                 result = await response.json()
 
-            # Build success result
+            # Parse c2pa-artifact response
+            did_info = result.get("did", {})
+
             return SigningResult(
                 success=True,
-                signature=result.get("signature"),
-                signature_format=result.get("signature_format", "c2pa"),
-                signature_algorithm=result.get("signature_algorithm", "ES256"),
-                certificate=result.get("certificate"),
-                certificate_fingerprint=result.get("certificate_fingerprint"),
-                c2pa_manifest=result.get("c2pa_manifest"),
-                c2pa_manifest_id=result.get("c2pa_manifest_id"),
-                c2pa_embedded=result.get("c2pa_embedded", True),
-                did_attestation=result.get("did_attestation"),
+                signature_format="c2pa",
+                signature_algorithm="ES256",
+                c2pa_manifest_id=result.get("manifest_filename"),
+                c2pa_embedded=True,
+                did_attestation=did_info.get("document") if did_info else None,
                 verifiable_credentials=result.get("verifiable_credentials"),
-                slsa_attestation=result.get("slsa_attestation"),
-                in_toto_attestation=result.get("in_toto_attestation"),
-                transparency_entry=result.get("transparency_entry"),
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=result.get("processing_time", datetime.now(timezone.utc).isoformat()),
                 provider_name=self.name,
                 provider_metadata={
                     "platform": "Noosphere Digital Integrity Platform",
-                    "policy_applied": signing_request["options"]["policy"],
-                    "credential_used": credential.id,
-                    "user_did": user_did
+                    "credential_used": result.get("credential_id", credential.id),
+                    "user_did": user_did,
+                    "file_hash": result.get("file_hash"),
+                    "processed_filename": result.get("processed_filename"),
+                    "download_url": f"{self.c2pa_url}{result.get('download_url')}",
+                    "artifact_did": did_info.get("id") if did_info else None,
+                    "did_services": did_info.get("services") if did_info else None,
+                    "publish_results": result.get("publish_results")
                 }
             )
 
@@ -416,15 +424,36 @@ class NoosphereProvider(BaseProvider):
             return await self._demo_verify(file_path, options)
 
         try:
+            # Get file info
+            file_info = await self._get_file_info(file_path)
+
+            # Step 1: Upload file for verification
+            form = aiohttp.FormData()
+            form.add_field(
+                'file',
+                open(file_path, 'rb'),
+                filename=file_info["name"],
+                content_type='application/octet-stream'
+            )
+
+            async with self._session.post(
+                f"{self.c2pa_url}/api/verify/upload",
+                data=form
+            ) as upload_response:
+                if upload_response.status != 200:
+                    error_text = await upload_response.text()
+                    return VerificationResult(
+                        valid=False,
+                        error=f"Upload for verification failed: {error_text}",
+                        provider_name=self.name
+                    )
+                upload_result = await upload_response.json()
+                stored_filename = upload_result.get("stored_filename")
+
+            # Step 2: Verify the uploaded file
             verification_request = {
-                "file_path": file_path,
-                "signature_path": signature_path,
-                "options": {
-                    "check_c2pa": options.get("check_c2pa", True),
-                    "check_did": options.get("check_did", True),
-                    "check_vc": options.get("check_vc", True),
-                    "check_chain": options.get("check_chain", True)
-                }
+                "filename": stored_filename,
+                "type": "verify"
             }
 
             async with self._session.post(
@@ -435,21 +464,25 @@ class NoosphereProvider(BaseProvider):
                     error_text = await response.text()
                     return VerificationResult(
                         valid=False,
-                        error=f"Verification request failed: {error_text}",
+                        error=f"Verification failed: {error_text}",
                         provider_name=self.name
                     )
 
                 result = await response.json()
 
+            # Parse c2pa-artifact verification response
+            is_valid = result.get("valid", False)
+            manifest = result.get("manifest", {})
+
             return VerificationResult(
-                valid=result.get("valid", False),
-                signature_valid=result.get("signature_valid", False),
-                certificate_valid=result.get("certificate_valid", False),
-                certificate_chain_valid=result.get("chain_valid", False),
-                timestamp_valid=result.get("timestamp_valid", False),
-                c2pa_valid=result.get("c2pa_valid"),
-                c2pa_manifest=result.get("c2pa_manifest"),
-                signer_identity=result.get("signer_identity"),
+                valid=is_valid,
+                signature_valid=is_valid,
+                certificate_valid=result.get("certificate_valid", is_valid),
+                certificate_chain_valid=result.get("chain_valid", is_valid),
+                timestamp_valid=result.get("timestamp_valid", True),
+                c2pa_valid=is_valid,
+                c2pa_manifest=manifest,
+                signer_identity=manifest.get("claim_generator"),
                 signer_did=result.get("signer_did"),
                 credentials_verified=result.get("credentials_verified"),
                 transparency_verified=result.get("transparency_verified", False),

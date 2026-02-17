@@ -13,13 +13,13 @@
 
     "noosphere": {
       "enabled": true,
-      "demo_mode": true,
-      "c2pa_service_url": "https://artifact-service.noosphere.tech",
-      "did_service_url": "https://did.noosphere.tech",
-      "vc_service_url": "https://vc.noosphere.tech",
+      "demo_mode": false,
+      "c2pa_service_url": "http://127.0.0.1:5002",
+      "did_service_url": "http://127.0.0.1:5002",
+      "vc_service_url": "http://127.0.0.1:5002",
       "api_key": "${NOOSPHERE_API_KEY}",
       "default_policy": "enterprise",
-      "_comment": "Set demo_mode to false and provide api_key for production"
+      "_comment": "For production, use https://artifact-service.noosphere.tech"
     },
 
     "signpath": {
