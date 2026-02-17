@@ -13,26 +13,32 @@
 
     "noosphere": {
       "enabled": true,
+      "demo_mode": true,
       "c2pa_service_url": "https://artifact-service.noosphere.tech",
       "did_service_url": "https://did.noosphere.tech",
       "vc_service_url": "https://vc.noosphere.tech",
       "api_key": "${NOOSPHERE_API_KEY}",
-      "default_policy": "enterprise"
+      "default_policy": "enterprise",
+      "_comment": "Set demo_mode to false and provide api_key for production"
     },
 
     "signpath": {
-      "enabled": false,
+      "enabled": true,
+      "demo_mode": true,
       "connector_url": "https://app.signpath.io",
       "organization_id": "${SIGNPATH_ORG_ID}",
       "api_token": "${SIGNPATH_API_TOKEN}",
       "project_slug": "default",
-      "signing_policy_slug": "release-signing"
+      "signing_policy_slug": "release-signing",
+      "_comment": "Set demo_mode to false and provide credentials for production"
     },
 
     "sigstore": {
       "enabled": true,
+      "demo_mode": true,
       "use_production": true,
-      "oidc_issuer": "https://oauth2.sigstore.dev/auth"
+      "oidc_issuer": "https://oauth2.sigstore.dev/auth",
+      "_comment": "Set demo_mode to false for real Sigstore keyless signing"
     },
 
     "local": {

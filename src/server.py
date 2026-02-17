@@ -761,7 +761,7 @@ class CodeSigningMCPServer:
                 transport,
                 InitializationOptions(
                     server_name="code-signing-mcp",
-                    server_version="1.0.0",
+                    server_version="1.1.0",
                     capabilities=self.server.get_capabilities(
                         notification_options=NotificationOptions(),
                         experimental_capabilities={}

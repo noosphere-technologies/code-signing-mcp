@@ -8,7 +8,6 @@ including credentials, security policies, and service endpoints.
 
 import json
 import os
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -53,7 +52,7 @@ class CredentialConfig(BaseModel):
     type: str = Field(..., regex="^(software|hsm|cloud_kms)$")
     security_level: str = Field(..., regex="^(standard|high|enterprise)$")
     enabled: bool = True
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     
     # Software key specific
     keystore_path: Optional[str] = None
@@ -71,7 +70,7 @@ class CredentialConfig(BaseModel):
     credentials: Optional[Dict[str, str]] = None
     
     # Certificate chain
-    certificate_chain: List[str] = field(default_factory=list)
+    certificate_chain: List[str] = Field(default_factory=list)
 
 
 class TimestampAuthorityConfig(BaseModel):
@@ -91,14 +90,14 @@ class BatchSettingsConfig(BaseModel):
 class SigningConfig(BaseModel):
     """Signing operation configuration."""
     default_credential: str
-    timestamp_authorities: List[TimestampAuthorityConfig] = field(default_factory=list)
+    timestamp_authorities: List[TimestampAuthorityConfig] = Field(default_factory=list)
     default_timestamp_url: str
     max_file_size: int = 104857600  # 100MB
-    supported_formats: List[str] = field(default_factory=lambda: [
+    supported_formats: List[str] = Field(default_factory=lambda: [
         "jar", "exe", "msi", "dmg", "pkg", "deb", "rpm",
         "appx", "msix", "apk", "ipa", "tar.gz", "zip"
     ])
-    batch_settings: BatchSettingsConfig = field(default_factory=BatchSettingsConfig)
+    batch_settings: BatchSettingsConfig = Field(default_factory=BatchSettingsConfig)
 
 
 class AuthenticationConfig(BaseModel):
@@ -119,7 +118,7 @@ class AuthorizationConfig(BaseModel):
     """Authorization configuration."""
     enabled: bool = True
     default_role: str = "user"
-    roles: Dict[str, RoleConfig] = field(default_factory=dict)
+    roles: Dict[str, RoleConfig] = Field(default_factory=dict)
 
 
 class RateLimitingConfig(BaseModel):
@@ -141,10 +140,10 @@ class AuditConfig(BaseModel):
 
 class SecurityConfig(BaseModel):
     """Security configuration."""
-    authentication: AuthenticationConfig = field(default_factory=AuthenticationConfig)
-    authorization: AuthorizationConfig = field(default_factory=AuthorizationConfig)
-    rate_limiting: RateLimitingConfig = field(default_factory=RateLimitingConfig)
-    audit: AuditConfig = field(default_factory=AuditConfig)
+    authentication: AuthenticationConfig = Field(default_factory=AuthenticationConfig)
+    authorization: AuthorizationConfig = Field(default_factory=AuthorizationConfig)
+    rate_limiting: RateLimitingConfig = Field(default_factory=RateLimitingConfig)
+    audit: AuditConfig = Field(default_factory=AuditConfig)
 
 
 class PolicySetConfig(BaseModel):
@@ -163,7 +162,7 @@ class PolicySetConfig(BaseModel):
 class PoliciesConfig(BaseModel):
     """Security policies configuration."""
     default_policy_set: str = "enterprise"
-    policy_sets: Dict[str, PolicySetConfig] = field(default_factory=dict)
+    policy_sets: Dict[str, PolicySetConfig] = Field(default_factory=dict)
 
 
 class C2PAConfig(BaseModel):
@@ -171,7 +170,7 @@ class C2PAConfig(BaseModel):
     enabled: bool = True
     default_embed: bool = True
     supported_formats: List[str] = ["jpg", "jpeg", "png", "webp", "pdf", "mp4"]
-    manifest_settings: Dict[str, Any] = field(default_factory=lambda: {
+    manifest_settings: Dict[str, Any] = Field(default_factory=lambda: {
         "include_provenance": True,
         "include_thumbnails": True,
         "compression_level": 6
@@ -195,8 +194,8 @@ class InTotoConfig(BaseModel):
 
 class AttestationsConfig(BaseModel):
     """Attestations configuration."""
-    slsa: SLSAConfig = field(default_factory=SLSAConfig)
-    in_toto: InTotoConfig = field(default_factory=InTotoConfig)
+    slsa: SLSAConfig = Field(default_factory=SLSAConfig)
+    in_toto: InTotoConfig = Field(default_factory=InTotoConfig)
 
 
 class GitHubIntegrationConfig(BaseModel):
@@ -215,8 +214,8 @@ class GitHubAPIConfig(BaseModel):
 
 class GitHubConfig(BaseModel):
     """GitHub configuration."""
-    integration: GitHubIntegrationConfig = field(default_factory=GitHubIntegrationConfig)
-    api: GitHubAPIConfig = field(default_factory=GitHubAPIConfig)
+    integration: GitHubIntegrationConfig = Field(default_factory=GitHubIntegrationConfig)
+    api: GitHubAPIConfig = Field(default_factory=GitHubAPIConfig)
 
 
 class MetricsConfig(BaseModel):
@@ -242,9 +241,9 @@ class TracingConfig(BaseModel):
 
 class MonitoringConfig(BaseModel):
     """Monitoring configuration."""
-    metrics: MetricsConfig = field(default_factory=MetricsConfig)
-    health_check: HealthCheckConfig = field(default_factory=HealthCheckConfig)
-    tracing: TracingConfig = field(default_factory=TracingConfig)
+    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
+    health_check: HealthCheckConfig = Field(default_factory=HealthCheckConfig)
+    tracing: TracingConfig = Field(default_factory=TracingConfig)
 
 
 class StorageConfig(BaseModel):
@@ -264,7 +263,7 @@ class ExperimentalFeaturesConfig(BaseModel):
 
 class FeaturesConfig(BaseModel):
     """Features configuration."""
-    experimental: ExperimentalFeaturesConfig = field(default_factory=ExperimentalFeaturesConfig)
+    experimental: ExperimentalFeaturesConfig = Field(default_factory=ExperimentalFeaturesConfig)
 
 
 class NoosphereProviderConfig(BaseModel):
@@ -316,10 +315,10 @@ class ProvidersConfig(BaseModel):
     - local: Offline signing with local keys
     """
     default: str = "noosphere"
-    noosphere: NoosphereProviderConfig = field(default_factory=NoosphereProviderConfig)
-    signpath: SignPathProviderConfig = field(default_factory=SignPathProviderConfig)
-    sigstore: SigstoreProviderConfig = field(default_factory=SigstoreProviderConfig)
-    local: LocalProviderConfig = field(default_factory=LocalProviderConfig)
+    noosphere: NoosphereProviderConfig = Field(default_factory=NoosphereProviderConfig)
+    signpath: SignPathProviderConfig = Field(default_factory=SignPathProviderConfig)
+    sigstore: SigstoreProviderConfig = Field(default_factory=SigstoreProviderConfig)
+    local: LocalProviderConfig = Field(default_factory=LocalProviderConfig)
 
     def to_factory_config(self) -> Dict[str, Any]:
         """Convert to format expected by ProviderFactory."""
@@ -336,19 +335,19 @@ class ProvidersConfig(BaseModel):
 
 class Config(BaseModel):
     """Main configuration class."""
-    server: ServerConfig = field(default_factory=ServerConfig)
+    server: ServerConfig = Field(default_factory=ServerConfig)
     services: Optional[ServicesConfig] = None  # Made optional - providers handle services now
-    providers: ProvidersConfig = field(default_factory=ProvidersConfig)
-    credentials: Dict[str, CredentialConfig] = field(default_factory=dict)
+    providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    credentials: Dict[str, CredentialConfig] = Field(default_factory=dict)
     signing: Optional[SigningConfig] = None  # Made optional - providers handle this now
-    security: SecurityConfig = field(default_factory=SecurityConfig)
-    policies: PoliciesConfig = field(default_factory=PoliciesConfig)
-    c2pa: C2PAConfig = field(default_factory=C2PAConfig)
-    attestations: AttestationsConfig = field(default_factory=AttestationsConfig)
-    github: GitHubConfig = field(default_factory=GitHubConfig)
-    monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
-    storage: StorageConfig = field(default_factory=StorageConfig)
-    features: FeaturesConfig = field(default_factory=FeaturesConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
+    policies: PoliciesConfig = Field(default_factory=PoliciesConfig)
+    c2pa: C2PAConfig = Field(default_factory=C2PAConfig)
+    attestations: AttestationsConfig = Field(default_factory=AttestationsConfig)
+    github: GitHubConfig = Field(default_factory=GitHubConfig)
+    monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
+    storage: StorageConfig = Field(default_factory=StorageConfig)
+    features: FeaturesConfig = Field(default_factory=FeaturesConfig)
     
     @validator('credentials')
     def validate_credentials(cls, v):

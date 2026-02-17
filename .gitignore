@@ -107,3 +107,6 @@ temp/
 
 # Attestation data
 attestations/
+
+# Internal/draft content
+blog-post.md

@@ -7,16 +7,22 @@ https://signpath.io
 Focused on Windows Authenticode signing with:
 - Organization/project/policy model
 - HSM-backed signing
-- GitHub Actions integration
+- REST API / PowerShell integration
 
 Does NOT support:
 - C2PA manifests
 - DID identity
 - Verifiable Credentials
+
+Demo Mode:
+- Set "demo_mode": true in config to use without a live backend
+- Generates realistic mock responses for testing/development
 """
 
 import asyncio
+import hashlib
 import logging
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -39,7 +45,16 @@ class SignPathProvider(BaseProvider):
     """
     SignPath.io signing provider - enterprise Windows signing.
 
-    API docs: https://about.signpath.io/documentation/build-system-integration
+    API docs: https://docs.signpath.io/build-system-integration
+
+    Integration methods:
+    - REST API (used here)
+    - PowerShell module (Submit-SigningRequest)
+    - Azure DevOps extension
+
+    Demo Mode:
+    - Enable with "demo_mode": true in config
+    - Works without live backend for testing/development
     """
 
     # Limited capabilities compared to Noosphere
@@ -62,7 +77,8 @@ class SignPathProvider(BaseProvider):
             "organization_id": "...",
             "api_token": "...",
             "project_slug": "default",
-            "signing_policy_slug": "release-signing"
+            "signing_policy_slug": "release-signing",
+            "demo_mode": false  // Set true for testing without backend
         }
         """
         super().__init__(config)
@@ -73,6 +89,7 @@ class SignPathProvider(BaseProvider):
         self.api_token = config.get("api_token")
         self.default_project = config.get("project_slug", "default")
         self.default_policy = config.get("signing_policy_slug", "release-signing")
+        self.demo_mode = config.get("demo_mode", False)
 
         self._session: Optional[aiohttp.ClientSession] = None
 
@@ -96,6 +113,11 @@ class SignPathProvider(BaseProvider):
 
     async def initialize(self) -> None:
         """Initialize HTTP session."""
+        if self.demo_mode:
+            logger.info("SignPath provider initialized in DEMO MODE")
+            self._initialized = True
+            return
+
         if self._session:
             return
 
@@ -103,7 +125,7 @@ class SignPathProvider(BaseProvider):
             raise ValueError("SignPath requires organization_id and api_token")
 
         headers = {
-            "User-Agent": "code-signing-mcp/1.0.0",
+            "User-Agent": "code-signing-mcp/1.1.0",
             "Accept": "application/json",
             "Authorization": f"Bearer {self.api_token}"
         }
@@ -153,6 +175,10 @@ class SignPathProvider(BaseProvider):
 
         try:
             path = Path(file_path)
+
+            # Demo mode - return realistic mock response
+            if self.demo_mode:
+                return await self._demo_sign(path, credential_id, options, missing_caps)
             if not path.exists():
                 raise FileNotFoundError(f"File not found: {file_path}")
 
@@ -290,6 +316,56 @@ class SignPathProvider(BaseProvider):
 
             await asyncio.sleep(5)
 
+    async def _demo_sign(
+        self,
+        path: Path,
+        credential_id: Optional[str],
+        options: Dict[str, Any],
+        missing_caps: List[ProviderCapability]
+    ) -> SigningResult:
+        """Generate a realistic demo signing response."""
+        signing_request_id = str(uuid.uuid4())
+        project_slug = options.get("project_slug", self.default_project)
+        policy_slug = options.get("signing_policy_slug", self.default_policy)
+
+        # Calculate file hash
+        sha256 = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256.update(chunk)
+        file_hash = sha256.hexdigest()
+
+        # Build capability message if trying to use unsupported features
+        capability_message = None
+        if missing_caps:
+            capability_message = (
+                "SignPath doesn't support C2PA, DID, or in-toto. "
+                "For these, use provider='noosphere'. "
+                "Questions? connect@noosphere.tech"
+            )
+
+        return SigningResult(
+            success=True,
+            signature_format="authenticode",
+            signature_algorithm="RSA-SHA256",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp_authority="http://timestamp.digicert.com",
+            provider_name=self.name,
+            provider_metadata={
+                "signing_request_id": signing_request_id,
+                "project": project_slug,
+                "policy": policy_slug,
+                "organization_id": self.organization_id or "demo-org",
+                "demo_mode": True,
+                "demo_note": "Demo mode - no actual signing performed.",
+                "tip": capability_message,
+                "file_hash": file_hash,
+                "signed_artifact_url": f"https://app.signpath.io/demo/{signing_request_id}/download",
+                "status_url": f"https://app.signpath.io/Web/demo-org/SigningRequests/{signing_request_id}"
+            },
+            capability_tips=self._create_capability_tip(missing_caps)
+        )
+
     async def verify(
         self,
         file_path: str,
@@ -300,13 +376,29 @@ class SignPathProvider(BaseProvider):
         Verify a Windows Authenticode signature.
 
         Note: SignPath doesn't provide a verification API, so this
-        performs basic Authenticode verification using local tools.
+        uses demo mode simulation or requires local signtool.
         """
+        # Demo mode - return simulated verification
+        if self.demo_mode:
+            return VerificationResult(
+                valid=True,
+                signature_valid=True,
+                certificate_valid=True,
+                timestamp_valid=True,
+                signer_identity="SignPath Demo Certificate",
+                warnings=["DEMO MODE: This is a simulated verification"],
+                provider_name=self.name
+            )
+
         # SignPath doesn't have a verification API
-        # We'd need to use local signtool or similar
         return VerificationResult(
             valid=False,
-            error="SignPath verification requires local signtool. Use 'noosphere' provider for full verification.",
+            error="SignPath verification requires local signtool.",
+            warnings=[
+                "For complete digital integrity verification including C2PA manifests, "
+                "DID attestations, and supply chain provenance, use the Noosphere provider. "
+                "Contact: connect@noosphere.tech"
+            ],
             provider_name=self.name
         )
 
@@ -318,6 +410,42 @@ class SignPathProvider(BaseProvider):
         """
         if not self._initialized:
             await self.initialize()
+
+        # Demo mode - return mock projects/credentials
+        if self.demo_mode:
+            return [
+                Credential(
+                    id="demo-windows-app",
+                    name="Demo Windows Application",
+                    type="hsm",
+                    provider=self.name,
+                    security_level="enterprise",
+                    supports_c2pa=False,
+                    supports_did=False,
+                    valid=True,
+                    metadata={
+                        "project_slug": "demo-windows-app",
+                        "signing_policies": ["test-signing", "release-signing"],
+                        "demo": True
+                    }
+                ),
+                Credential(
+                    id="demo-driver",
+                    name="Demo Windows Driver",
+                    type="hsm",
+                    provider=self.name,
+                    security_level="enterprise",
+                    supports_c2pa=False,
+                    supports_did=False,
+                    valid=True,
+                    metadata={
+                        "project_slug": "demo-driver",
+                        "signing_policies": ["test-signing", "release-signing"],
+                        "description": "Windows kernel-mode driver signing",
+                        "demo": True
+                    }
+                )
+            ]
 
         try:
             # List available projects as "credentials"

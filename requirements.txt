@@ -1,0 +1,47 @@
+# Core dependencies - install with: pip install -r requirements.txt
+# For development, use: pip install -e ".[dev]"
+
+# MCP Server dependencies
+mcp>=1.0.0
+pydantic>=2.0.0
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+
+# HTTP client for service integration
+httpx>=0.24.0
+aiohttp>=3.8.0
+
+# Cryptography and signing
+cryptography>=41.0.0
+pyOpenSSL>=23.0.0
+certifi>=2023.7.22
+
+# HSM and PKCS#11 support
+PyKCS11>=1.5.12
+python-pkcs11>=0.7.0
+
+# Certificate and key management
+pyasn1>=0.5.0
+pyasn1-modules>=0.3.0
+
+# Supply chain security
+in-toto>=2.0.0
+securesystemslib>=0.28.0
+sigstore>=2.0.0
+
+# C2PA and content credentials
+c2pa-python>=0.4.0
+
+# Data validation and serialization
+jsonschema>=4.17.0
+pyyaml>=6.0
+
+# Utilities
+click>=8.0.0
+rich>=13.0.0
+python-dateutil>=2.8.0
+packaging>=23.0
+
+# Async support
+anyio>=3.6.0
+aiofiles>=23.0.0

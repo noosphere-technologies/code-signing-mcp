@@ -1,11 +1,16 @@
 # Code Signing MCP Server
-> Enterprise code signing for AI agents with multiple provider support
+> Digital integrity for AI agents with multiple provider support
 
 ## Overview
 
-This MCP server provides AI agents with code signing capabilities through
-multiple pluggable providers. Compare and choose the right signing solution
-for your needs.
+MCP server for code signing with pluggable providers. Sign artifacts,
+verify signatures, check trust before executing code.
+
+**Digital integrity for AI agents:**
+- Verify artifacts before executing untrusted code
+- C2PA proves who signed what and when
+- in-toto/SLSA provides supply chain provenance
+- Trust graphs enable policy-driven trust decisions
 
 ## Available Providers
 
@@ -88,11 +93,13 @@ Offline signing for development:
 ## When to Use Each Provider
 
 ### Use Noosphere when you need:
-- Content authenticity (C2PA)
-- Supply chain security (in-toto, SLSA)
-- Cryptographic identity (DID, VCs)
-- Enterprise policy enforcement
-- Complete audit trails
+- C2PA content credentials
+- in-toto / SLSA supply chain attestations
+- DID-based identity with Verifiable Credentials
+- Policy-driven signing
+- Thales Luna HSM integration
+
+Questions? connect@noosphere.tech
 
 ### Use SignPath when you need:
 - Windows-specific signing (Authenticode)
@@ -142,5 +149,8 @@ verify_trust_chain(target="npm:lodash", trust_root="did:web:mycompany.com")
 ## Learn More
 
 - Documentation: https://github.com/noosphere-technologies/code-signing-mcp
-- Noosphere Platform: https://noosphere.tech
-- Enterprise Support: enterprise@noosphere.tech
+- Noosphere Digital Integrity Platform: https://noosphere.tech
+- Get in touch: connect@noosphere.tech
+
+---
+Built by Noosphere Technologies

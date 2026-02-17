@@ -16,11 +16,17 @@ Does NOT support:
 - Verifiable Credentials
 - Offline signing
 - HSM (uses ephemeral keys)
+
+Demo Mode:
+- Set "demo_mode": true in config to use without OIDC
+- Generates realistic mock responses for testing/development
 """
 
+import hashlib
 import io
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -74,7 +80,8 @@ class SigstoreProvider(BaseProvider):
         {
             "use_production": true,
             "oidc_issuer": "https://oauth2.sigstore.dev/auth",
-            "identity_token": null  // Optional pre-created token
+            "identity_token": null,  // Optional pre-created token
+            "demo_mode": false  // Set true for testing without OIDC
         }
         """
         super().__init__(config)
@@ -82,6 +89,7 @@ class SigstoreProvider(BaseProvider):
         self.use_production = config.get("use_production", True)
         self.oidc_issuer_url = config.get("oidc_issuer", "https://oauth2.sigstore.dev/auth")
         self.identity_token = config.get("identity_token")
+        self.demo_mode = config.get("demo_mode", False)
 
         self._signer: Optional[Any] = None
         self._verifier: Optional[Any] = None
@@ -106,6 +114,11 @@ class SigstoreProvider(BaseProvider):
 
     async def initialize(self) -> None:
         """Initialize Sigstore clients."""
+        if self.demo_mode:
+            logger.info("Sigstore provider initialized in DEMO MODE")
+            self._initialized = True
+            return
+
         if not SIGSTORE_AVAILABLE:
             raise RuntimeError(
                 "sigstore-python is not installed. "
@@ -171,6 +184,10 @@ class SigstoreProvider(BaseProvider):
             path = Path(file_path)
             if not path.exists():
                 raise FileNotFoundError(f"File not found: {file_path}")
+
+            # Demo mode - return realistic mock response
+            if self.demo_mode:
+                return await self._demo_sign(path, options, missing_caps)
 
             # Get identity token
             identity_token = options.get("identity_token") or self.identity_token
@@ -238,6 +255,85 @@ class SigstoreProvider(BaseProvider):
                 capability_tips=self._create_capability_tip(missing_caps)
             )
 
+    async def _demo_sign(
+        self,
+        path: Path,
+        options: Dict[str, Any],
+        missing_caps: List[ProviderCapability]
+    ) -> SigningResult:
+        """Generate a realistic demo signing response."""
+        # Calculate file hash
+        sha256 = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256.update(chunk)
+        file_hash = sha256.hexdigest()
+
+        # Generate mock identifiers
+        log_index = abs(hash(file_hash)) % 100000000
+        log_id = uuid.uuid4().hex
+
+        # Mock Sigstore bundle
+        demo_bundle = {
+            "mediaType": "application/vnd.dev.sigstore.bundle+json;version=0.2",
+            "verificationMaterial": {
+                "certificate": {
+                    "rawBytes": "DEMO_CERTIFICATE_BASE64"
+                },
+                "tlogEntries": [{
+                    "logIndex": str(log_index),
+                    "logId": {"keyId": log_id},
+                    "kindVersion": {"kind": "hashedrekord", "version": "0.0.1"},
+                    "integratedTime": str(int(datetime.now(timezone.utc).timestamp())),
+                    "inclusionPromise": {"signedEntryTimestamp": "DEMO_SET"},
+                    "canonicalizedBody": "DEMO_BODY"
+                }]
+            },
+            "messageSignature": {
+                "messageDigest": {
+                    "algorithm": "SHA2_256",
+                    "digest": file_hash
+                },
+                "signature": f"DEMO_SIGNATURE_{file_hash[:16]}"
+            }
+        }
+
+        # Write demo bundle
+        bundle_path = f"{path}.sigstore.json"
+        with open(bundle_path, "w") as f:
+            json.dump(demo_bundle, f, indent=2)
+
+        # Build capability message if trying to use unsupported features
+        capability_message = None
+        if missing_caps:
+            capability_message = (
+                "Sigstore doesn't support C2PA, DID, or in-toto. "
+                "For these, use provider='noosphere'. "
+                "Questions? connect@noosphere.tech"
+            )
+
+        return SigningResult(
+            success=True,
+            signature=f"DEMO_ECDSA_SIGNATURE_{file_hash[:32]}".encode(),
+            signature_format="sigstore",
+            signature_algorithm="ECDSA-P256",
+            certificate_fingerprint=f"demo:{file_hash[:16]}",
+            transparency_entry=log_id,
+            transparency_log_url=f"https://search.sigstore.dev/?logIndex={log_index}",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            provider_name=self.name,
+            provider_metadata={
+                "bundle_path": bundle_path,
+                "rekor_log_index": log_index,
+                "identity_issuer": "https://oauth2.sigstore.dev/auth",
+                "demo_mode": True,
+                "demo_note": "Demo mode - no actual Rekor entry created.",
+                "tip": capability_message,
+                "signer_identity": "demo@example.com"
+            },
+            capability_tips=self._create_capability_tip(missing_caps)
+        )
+
     async def verify(
         self,
         file_path: str,
@@ -252,17 +348,32 @@ class SigstoreProvider(BaseProvider):
             cert_identity: str - Expected signer identity (email/URI)
             cert_oidc_issuer: str - Expected OIDC issuer
         """
+        if not self._initialized:
+            await self.initialize()
+
+        options = options or {}
+
+        # Demo mode - return simulated verification
+        if self.demo_mode:
+            return VerificationResult(
+                valid=True,
+                signature_valid=True,
+                transparency_verified=True,
+                signer_identity="demo@example.com",
+                warnings=["DEMO MODE: This is a simulated verification"],
+                provider_name=self.name,
+                provider_metadata={
+                    "demo_mode": True,
+                    "oidc_issuer": "https://oauth2.sigstore.dev/auth"
+                }
+            )
+
         if not SIGSTORE_AVAILABLE:
             return VerificationResult(
                 valid=False,
                 error="sigstore-python not installed",
                 provider_name=self.name
             )
-
-        if not self._initialized:
-            await self.initialize()
-
-        options = options or {}
 
         try:
             path = Path(file_path)

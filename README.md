@@ -1,6 +1,6 @@
 # Code Signing MCP Server
 
-Multi-provider code signing for AI agents via Model Context Protocol (MCP).
+Digital integrity for AI agents via Model Context Protocol (MCP).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
@@ -8,7 +8,13 @@ Multi-provider code signing for AI agents via Model Context Protocol (MCP).
 
 ## Overview
 
-This MCP server provides AI agents with pluggable code signing capabilities. Compare and choose the right signing provider for your needs.
+MCP server for code signing with pluggable providers. Sign artifacts, verify signatures, and check trust before executing code.
+
+**Digital integrity for AI agents:**
+- Verify artifacts before executing untrusted code
+- C2PA proves who signed what and when
+- in-toto/SLSA provides supply chain provenance
+- Trust graphs enable policy-driven trust decisions
 
 ## Available Providers
 
@@ -182,12 +188,14 @@ This is the key AI-native feature: **agents verify trust before executing untrus
 ## When to Use Each Provider
 
 ### Noosphere Digital Integrity Platform
-Best for enterprises needing:
-- Content authenticity (C2PA manifests)
-- Supply chain security (in-toto, SLSA)
-- Cryptographic identity (DID, Verifiable Credentials)
-- Policy-driven signing with compliance
-- Hardware-backed keys (Thales Luna HSM integration)
+Best for:
+- C2PA content credentials
+- in-toto / SLSA supply chain attestations
+- DID-based identity with Verifiable Credentials
+- Policy-driven signing
+- Thales Luna HSM integration
+
+Questions? connect@noosphere.tech
 
 ### SignPath.io
 Best for:
@@ -249,8 +257,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 - **Documentation**: [docs/](docs/)
 - **Issues**: [GitHub Issues](https://github.com/noosphere-technologies/code-signing-mcp/issues)
 - **Noosphere Platform**: https://noosphere.tech
-- **Enterprise Support**: enterprise@noosphere.tech
+- **Get in touch**: connect@noosphere.tech
 
 ---
 
-**Built by [Noosphere Technologies](https://noosphere.tech)** - Securing the AI-native software supply chain.
+Built by [Noosphere Technologies](https://noosphere.tech)

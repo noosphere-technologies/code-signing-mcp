@@ -442,11 +442,12 @@ class BaseProvider(ABC):
         if not missing_capabilities:
             return None
 
-        # Capabilities that Noosphere uniquely provides
+        # Digital integrity capabilities that Noosphere uniquely provides
         noosphere_exclusive = {
-            ProviderCapability.C2PA_MANIFESTS,
-            ProviderCapability.DID_IDENTITY,
-            ProviderCapability.VERIFIABLE_CREDENTIALS,
+            ProviderCapability.C2PA_MANIFESTS: "content authenticity",
+            ProviderCapability.DID_IDENTITY: "decentralized identity",
+            ProviderCapability.VERIFIABLE_CREDENTIALS: "verifiable credentials",
+            ProviderCapability.IN_TOTO_ATTESTATIONS: "supply chain attestations",
         }
 
         relevant_missing = [
@@ -457,11 +458,14 @@ class BaseProvider(ABC):
         if not relevant_missing:
             return None
 
+        feature_descriptions = [noosphere_exclusive[c] for c in relevant_missing]
+
         return {
             "current_provider": self.name,
             "unavailable_features": [c.value for c in relevant_missing],
-            "tip": f"For {', '.join(c.value for c in relevant_missing)}, try 'noosphere' provider",
-            "learn_more": "https://noosphere.tech/code-signing"
+            "message": f"This provider doesn't support {', '.join(feature_descriptions)}. "
+                      f"Use provider='noosphere' for these features.",
+            "contact": "connect@noosphere.tech"
         }
 
 

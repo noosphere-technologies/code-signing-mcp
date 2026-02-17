@@ -11,10 +11,15 @@ This is the premium provider with all capabilities:
 - Verifiable Credentials
 - Policy Engine
 - HSM Support (Thales Luna HSM via c2pa-artifact)
+
+Demo Mode:
+- Set "demo_mode": true in config to use without a live backend
+- Generates realistic mock responses for testing/development
 """
 
 import hashlib
 import logging
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -38,9 +43,13 @@ class NoosphereProvider(BaseProvider):
     Noosphere Digital Integrity Platform - full-featured enterprise signing.
 
     Integrates with:
-    - artifact-service.noosphere.tech (C2PA + in-toto signing)
-    - did.noosphere.tech (DID identity)
-    - vc.noosphere.tech (Verifiable Credentials)
+    - c2pa-artifact service (C2PA + in-toto signing)
+    - DID service (DID identity)
+    - VC service (Verifiable Credentials)
+
+    Demo Mode:
+    - Enable with "demo_mode": true in config
+    - Works without live backend for testing/development
 
     HSM Support:
     - Thales Luna HSM integration via c2pa-artifact service
@@ -76,7 +85,8 @@ class NoosphereProvider(BaseProvider):
             "did_service_url": "https://did.noosphere.tech",
             "vc_service_url": "https://vc.noosphere.tech",
             "api_key": "...",
-            "default_policy": "enterprise"
+            "default_policy": "enterprise",
+            "demo_mode": false  // Set true for testing without backend
         }
         """
         super().__init__(config)
@@ -86,6 +96,7 @@ class NoosphereProvider(BaseProvider):
         self.vc_url = config.get("vc_service_url", "https://vc.noosphere.tech")
         self.api_key = config.get("api_key")
         self.default_policy = config.get("default_policy", "enterprise")
+        self.demo_mode = config.get("demo_mode", False)
 
         self._session: Optional[aiohttp.ClientSession] = None
 
@@ -111,11 +122,16 @@ class NoosphereProvider(BaseProvider):
 
     async def initialize(self) -> None:
         """Initialize HTTP session."""
+        if self.demo_mode:
+            logger.info("Noosphere provider initialized in DEMO MODE")
+            self._initialized = True
+            return
+
         if self._session:
             return
 
         headers = {
-            "User-Agent": "code-signing-mcp/1.0.0",
+            "User-Agent": "code-signing-mcp/1.1.0",
             "Accept": "application/json",
             "Content-Type": "application/json"
         }
@@ -163,6 +179,10 @@ class NoosphereProvider(BaseProvider):
             # Validate file
             file_info = await self._get_file_info(file_path)
 
+            # Demo mode - return realistic mock response
+            if self.demo_mode:
+                return await self._demo_sign(file_info, credential_id, options)
+
             # Get user DID
             user_did = await self._get_current_user_did()
 
@@ -196,7 +216,7 @@ class NoosphereProvider(BaseProvider):
 
             # Call C2PA service
             async with self._session.post(
-                f"{self.c2pa_url}/api/v1/sign",
+                f"{self.c2pa_url}/api/process",
                 json=signing_request
             ) as response:
                 if response.status != 200:
@@ -249,6 +269,127 @@ class NoosphereProvider(BaseProvider):
                 provider_name=self.name
             )
 
+    async def _demo_sign(
+        self,
+        file_info: Dict[str, Any],
+        credential_id: Optional[str],
+        options: Dict[str, Any]
+    ) -> SigningResult:
+        """Generate a realistic demo signing response."""
+        manifest_id = f"urn:uuid:{uuid.uuid4()}"
+        demo_did = "did:web:demo.noosphere.tech"
+
+        # Generate mock C2PA manifest
+        c2pa_manifest = {
+            "claim_generator": "Noosphere/1.0.0 c2pa-rs/0.25.0",
+            "title": file_info["name"],
+            "format": file_info["type"],
+            "instance_id": manifest_id,
+            "claim_generator_info": [{
+                "name": "Noosphere Digital Integrity Platform",
+                "version": "1.0.0"
+            }],
+            "assertions": [
+                {
+                    "label": "c2pa.actions",
+                    "data": {
+                        "actions": [{
+                            "action": "c2pa.signed",
+                            "when": datetime.now(timezone.utc).isoformat(),
+                            "softwareAgent": "code-signing-mcp/1.1.0"
+                        }]
+                    }
+                },
+                {
+                    "label": "stds.schema-org.CreativeWork",
+                    "data": {
+                        "@context": "https://schema.org",
+                        "@type": "SoftwareApplication",
+                        "name": file_info["name"],
+                        "sha256": file_info["sha256"]
+                    }
+                }
+            ],
+            "signature_info": {
+                "alg": "ES256",
+                "issuer": demo_did,
+                "time": datetime.now(timezone.utc).isoformat()
+            }
+        }
+
+        # Generate mock in-toto attestation
+        in_toto_attestation = {
+            "_type": "https://in-toto.io/Statement/v0.1",
+            "predicateType": "https://slsa.dev/provenance/v0.2",
+            "subject": [{
+                "name": file_info["name"],
+                "digest": {"sha256": file_info["sha256"]}
+            }],
+            "predicate": {
+                "builder": {"id": "https://noosphere.tech/builder/v1"},
+                "buildType": "https://noosphere.tech/CodeSigningMCP/v1",
+                "invocation": {
+                    "configSource": {},
+                    "parameters": options
+                },
+                "metadata": {
+                    "buildStartedOn": datetime.now(timezone.utc).isoformat(),
+                    "buildFinishedOn": datetime.now(timezone.utc).isoformat(),
+                    "completeness": {
+                        "parameters": True,
+                        "environment": False,
+                        "materials": True
+                    }
+                }
+            }
+        }
+
+        # Generate mock DID attestation
+        did_attestation = {
+            "@context": ["https://www.w3.org/2018/credentials/v1"],
+            "type": ["VerifiableCredential", "CodeSigningAttestation"],
+            "issuer": demo_did,
+            "issuanceDate": datetime.now(timezone.utc).isoformat(),
+            "credentialSubject": {
+                "id": manifest_id,
+                "artifact": {
+                    "name": file_info["name"],
+                    "sha256": file_info["sha256"],
+                    "size": file_info["size"]
+                }
+            }
+        }
+
+        return SigningResult(
+            success=True,
+            signature=b"DEMO_SIGNATURE_" + file_info["sha256"][:16].encode(),
+            signature_format="c2pa",
+            signature_algorithm="ES256",
+            certificate_fingerprint=f"demo:{file_info['sha256'][:16]}",
+            c2pa_manifest=c2pa_manifest,
+            c2pa_manifest_id=manifest_id,
+            c2pa_embedded=options.get("embed_c2pa", True),
+            did_attestation=did_attestation,
+            verifiable_credentials=[did_attestation],
+            in_toto_attestation=in_toto_attestation,
+            slsa_attestation=in_toto_attestation,
+            transparency_entry=f"demo-log-entry-{uuid.uuid4().hex[:8]}",
+            transparency_log_url="https://demo.noosphere.tech/transparency",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp_authority="https://demo.noosphere.tech/tsa",
+            provider_name=self.name,
+            provider_metadata={
+                "platform": "Noosphere Digital Integrity Platform",
+                "demo_mode": True,
+                "demo_note": "Demo mode - signatures are simulated. "
+                            "For production use, set demo_mode=false and configure API key.",
+                "contact": "connect@noosphere.tech",
+                "policy_applied": options.get("policy", self.default_policy),
+                "credential_used": credential_id or "demo-software-key",
+                "user_did": demo_did
+            }
+        )
+
     async def verify(
         self,
         file_path: str,
@@ -269,6 +410,10 @@ class NoosphereProvider(BaseProvider):
 
         options = options or {}
 
+        # Demo mode
+        if self.demo_mode:
+            return await self._demo_verify(file_path, options)
+
         try:
             verification_request = {
                 "file_path": file_path,
@@ -282,7 +427,7 @@ class NoosphereProvider(BaseProvider):
             }
 
             async with self._session.post(
-                f"{self.c2pa_url}/api/v1/verify",
+                f"{self.c2pa_url}/api/verify",
                 json=verification_request
             ) as response:
                 if response.status != 200:
@@ -320,10 +465,70 @@ class NoosphereProvider(BaseProvider):
                 provider_name=self.name
             )
 
+    async def _demo_verify(
+        self,
+        file_path: str,
+        options: Dict[str, Any]
+    ) -> VerificationResult:
+        """Generate a realistic demo verification response."""
+        file_info = await self._get_file_info(file_path)
+
+        return VerificationResult(
+            valid=True,
+            signature_valid=True,
+            certificate_valid=True,
+            certificate_chain_valid=True,
+            timestamp_valid=True,
+            c2pa_valid=True,
+            c2pa_manifest={
+                "claim_generator": "Noosphere/1.0.0",
+                "title": file_info["name"],
+                "assertions": [{"label": "c2pa.actions", "data": {"actions": []}}]
+            },
+            signer_identity="Noosphere Demo Signer",
+            signer_did="did:web:demo.noosphere.tech",
+            credentials_verified=[{
+                "type": "CodeSigningCredential",
+                "issuer": "did:web:demo.noosphere.tech",
+                "valid": True
+            }],
+            transparency_verified=True,
+            transparency_entry=f"demo-entry-{file_info['sha256'][:8]}",
+            warnings=["DEMO MODE: This is a simulated verification"],
+            provider_name=self.name
+        )
+
     async def get_credentials(self) -> List[Credential]:
         """Get available credentials from Noosphere VC service."""
         if not self._initialized:
             await self.initialize()
+
+        # Demo mode - return mock credentials
+        if self.demo_mode:
+            return [
+                Credential(
+                    id="demo-software-key",
+                    name="Demo Software Key",
+                    type="software",
+                    provider=self.name,
+                    security_level="standard",
+                    supports_c2pa=True,
+                    supports_did=True,
+                    valid=True,
+                    metadata={"demo": True}
+                ),
+                Credential(
+                    id="demo-hsm-key",
+                    name="Demo HSM Key (Thales Luna)",
+                    type="hsm",
+                    provider=self.name,
+                    security_level="enterprise",
+                    supports_c2pa=True,
+                    supports_did=True,
+                    valid=True,
+                    metadata={"demo": True, "hsm_type": "Thales Luna"}
+                )
+            ]
 
         try:
             async with self._session.get(f"{self.vc_url}/api/credentials") as response:
@@ -405,6 +610,9 @@ class NoosphereProvider(BaseProvider):
 
     async def _get_current_user_did(self) -> str:
         """Get the current user's DID."""
+        if self.demo_mode:
+            return "did:web:demo.noosphere.tech"
+
         try:
             async with self._session.get(f"{self.did_url}/api/me") as response:
                 if response.status == 200:

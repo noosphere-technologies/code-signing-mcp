@@ -25,6 +25,8 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # 3. Install dependencies
 pip install -r requirements.txt
+# Or for development with all tools:
+# pip install -e ".[dev]"
 
 # 4. Configure the server
 cp config/config.example.json config/config.json
