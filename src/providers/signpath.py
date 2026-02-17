@@ -60,6 +60,7 @@ class SignPathProvider(BaseProvider):
     # Limited capabilities compared to Noosphere
     CAPABILITIES = [
         ProviderCapability.BINARY_SIGNING,
+        ProviderCapability.OFFICE_MACRO_SIGNING,
         ProviderCapability.BATCH_SIGNING,
         ProviderCapability.POLICY_ENGINE,
         ProviderCapability.HSM_SUPPORT,

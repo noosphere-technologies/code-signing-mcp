@@ -60,6 +60,7 @@ class NoosphereProvider(BaseProvider):
     CAPABILITIES = [
         ProviderCapability.BINARY_SIGNING,
         ProviderCapability.PACKAGE_SIGNING,
+        ProviderCapability.OFFICE_MACRO_SIGNING,
         ProviderCapability.BATCH_SIGNING,
         ProviderCapability.C2PA_MANIFESTS,
         ProviderCapability.IN_TOTO_ATTESTATIONS,
@@ -589,6 +590,7 @@ class NoosphereProvider(BaseProvider):
         """Detect artifact type from extension."""
         ext = path.suffix.lower()
         type_map = {
+            # Executables
             ".jar": "java_archive",
             ".war": "web_archive",
             ".exe": "windows_executable",
@@ -597,14 +599,25 @@ class NoosphereProvider(BaseProvider):
             ".pkg": "macos_package",
             ".deb": "debian_package",
             ".rpm": "rpm_package",
+            # Packages
             ".whl": "python_wheel",
             ".gem": "ruby_gem",
             ".nupkg": "nuget_package",
             ".tgz": "npm_package",
             ".apk": "android_package",
             ".ipa": "ios_package",
+            # Archives
             ".zip": "archive",
-            ".tar.gz": "archive"
+            ".tar.gz": "archive",
+            # Office documents with macros
+            ".docm": "office_macro",
+            ".xlsm": "office_macro",
+            ".pptm": "office_macro",
+            ".dotm": "office_macro_template",
+            ".xltm": "office_macro_template",
+            ".potm": "office_macro_template",
+            ".xlam": "excel_addin",
+            ".ppam": "powerpoint_addin",
         }
         return type_map.get(ext, "binary")
 

@@ -30,6 +30,7 @@ MCP server for code signing with pluggable providers. Sign artifacts, verify sig
 | Capability | Noosphere | SignPath | Sigstore | Local |
 |------------|:---------:|:--------:|:--------:|:-----:|
 | Binary Signing | ✓ | ✓ | ✓ | ✓ |
+| Office Macro Signing | ✓ | ✓ | - | - |
 | C2PA Manifests | ✓ | - | - | - |
 | in-toto Attestations | ✓ | - | - | - |
 | DID Identity | ✓ | - | - | - |
@@ -88,6 +89,7 @@ Add to your Claude Desktop MCP settings:
 ### Core Signing
 - `sign_binary` - Sign any binary file
 - `sign_package` - Sign software packages (npm, NuGet, JAR, wheel)
+- `sign_office_macro` - Sign Office VBA macros (Word, Excel, PowerPoint)
 - `verify_signature` - Verify signatures and manifests
 - `batch_sign` - Bulk signing operations
 
@@ -120,6 +122,16 @@ User: "Sign with Sigstore for open source"
 AI Agent: sign_binary(file_path="app", provider="sigstore")
 
 Result: Keyless signature with Rekor transparency log entry
+```
+
+### Sign Office Macros
+
+```
+User: "Sign the Excel macro file"
+
+AI Agent: sign_office_macro(file_path="report.xlsm")
+
+Result: VBA project signed with Authenticode certificate
 ```
 
 ### Compare Providers

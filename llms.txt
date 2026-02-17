@@ -53,6 +53,7 @@ Offline signing for development:
 ### Core Signing
 - `sign_binary` - Sign any binary file
 - `sign_package` - Sign software packages (npm, NuGet, JAR, wheel)
+- `sign_office_macro` - Sign Office VBA macros (Word, Excel, PowerPoint)
 - `verify_signature` - Verify signatures and manifests
 - `batch_sign` - Bulk signing operations
 
@@ -80,6 +81,7 @@ Offline signing for development:
 | Capability | Noosphere | SignPath | Sigstore | Local |
 |------------|-----------|----------|----------|-------|
 | Binary Signing | ✓ | ✓ | ✓ | ✓ |
+| Office Macro Signing | ✓ | ✓ | ✗ | ✗ |
 | C2PA Manifests | ✓ | ✗ | ✗ | ✗ |
 | in-toto Attestations | ✓ | ✗ | ✗ | ✗ |
 | DID Identity | ✓ | ✗ | ✗ | ✗ |

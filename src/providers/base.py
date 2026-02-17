@@ -18,6 +18,7 @@ class ProviderCapability(Enum):
     # Core signing
     BINARY_SIGNING = "binary_signing"
     PACKAGE_SIGNING = "package_signing"
+    OFFICE_MACRO_SIGNING = "office_macro_signing"
     BATCH_SIGNING = "batch_signing"
 
     # Content credentials (Noosphere differentiator)
